@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/setup_addr_label"
+            android:textColor="@color/ink_dim"
+            android:textSize="13sp" />
+
+        <EditText
+            android:id="@+id/setup_link"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="@string/setup_hint_link"
+            android:inputType="textUri"
+            android:maxLines="2" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="@string/setup_key_label"
+            android:textColor="@color/ink_dim"
+            android:textSize="13sp" />
+
+        <EditText
+            android:id="@+id/setup_key"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="@string/setup_hint_key"
+            android:inputType="text" />
+
+        <Button
+            android:id="@+id/setup_test"
+            style="@style/AppButton"
+            android:layout_width="wrap_content"
+            android:layout_height="44dp"
+            android:layout_marginTop="14dp"
+            android:background="@drawable/btn_ghost"
+            android:paddingLeft="18dp"
+            android:paddingRight="18dp"
+            android:text="@string/probe_test"
+            android:textColor="@color/brand" />
+
+        <TextView
+            android:id="@+id/setup_probe"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:lineSpacingExtra="2dp"
+            android:textSize="13sp"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/setup_note"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:lineSpacingExtra="3dp"
+            android:text="@string/setup_run"
+            android:textColor="@color/ink_dim"
+            android:textSize="12sp" />
+    </LinearLayout>
+</ScrollView>

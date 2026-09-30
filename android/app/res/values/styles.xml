@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- No action bar: the layout carries its own Toolbar. On API 30+ MainActivity draws under the
+         system bars (transparent status and gesture bars, insets applied to the root as padding),
+         so the page's own background reaches the screen edge and the gesture pill floats over it;
+         the colours below stay as the fallback for older devices, where the bars remain opaque.
+         Both bars get light icons, since the toolbar and the DSH page are light in this theme. -->
+    <style name="AppTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:colorPrimary">@color/brand</item>
+        <item name="android:colorPrimaryDark">@color/page_bg</item>
+        <item name="android:colorAccent">@color/brand</item>
+        <item name="android:windowBackground">@color/page_bg</item>
+        <item name="android:statusBarColor">@color/page_bg</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+
+    <style name="AppPopupTheme" parent="@android:style/ThemeOverlay.Material.Light" />
+
+    <style name="AppButton" parent="@android:style/Widget.Material.Button.Borderless">
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textSize">15sp</item>
+    </style>
+
+    <!-- Both text colours below are theme colours, so these two styles need no night twin. -->
+    <style name="AppBarTitle" parent="@android:style/TextAppearance.Material.Title">
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:textColor">@color/ink</item>
+        <item name="android:textSize">15sp</item>
+        <item name="android:textStyle">normal</item>
+    </style>
+
+    <style name="AppBarSubtitle" parent="@android:style/TextAppearance.Material.Subhead">
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:textColor">@color/ink_dim</item>
+        <item name="android:textSize">11sp</item>
+        <item name="android:textStyle">normal</item>
+    </style>
+</resources>

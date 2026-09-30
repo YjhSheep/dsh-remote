@@ -1,0 +1,19 @@
+# ---- 本机私有，绝不入库 ----
+tools/.bridge-key
+tools/bridge.log
+tools/layout.json
+
+# ---- 体积大 / 可重新生成 ----
+# android/android-sdk/ ：bootstrap-sdk.ps1 可重建，231 MB
+android/android-sdk/
+# android/dl/ ：下载的 build-tools / platform 压缩包，116 MB
+android/dl/
+android/build/
+tmp/
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+Desktop.ini

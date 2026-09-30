@@ -1,0 +1,29 @@
+<resources>
+    <string name="app_name">DeepSeek Harness</string>
+    <string name="action_setup">设置</string>
+    <string name="action_reload">重新加载</string>
+    <string name="setup_hint_link">电脑地址，或桥接打印的完整链接\n例：192.168.31.216:3080</string>
+    <string name="setup_hint_key">访问密钥（链接里已含 k= 时留空）</string>
+    <string name="setup_run">请先在电脑上运行 tools\\dsh-lan-bridge.cmd</string>
+    <string name="connect">连接</string>
+    <string name="cancel">取消</string>
+    <string name="err_title">连不上电脑上的 DSH</string>
+    <string name="err_body">请确认：电脑已开机、桥接正在运行、手机和电脑在同一网络。</string>
+    <string name="err_retry">重试</string>
+    <string name="err_target">目标</string>
+    <string name="err_reason">原因</string>
+    <string name="err_webview">系统 WebView</string>
+    <string name="st_connecting">连接中…</string>
+    <string name="st_connected">已连接</string>
+    <string name="st_failed">连不上</string>
+    <string name="setup_addr_label">电脑地址</string>
+    <string name="setup_key_label">访问密钥</string>
+    <string name="probe_test">测试连接</string>
+    <string name="probe_ok">能连上</string>
+    <string name="probe_fail">连不上</string>
+    <string name="probe_testing">测试中…</string>
+    <string name="st_idle">未连接</string>
+    <string name="setup_title">连接到电脑</string>
+    <string name="setup_note_map">本机 127.0.0.1:%1$d → %2$s:%3$d</string>
+    <string name="err_no_addr">请填电脑地址</string>
+</resources>

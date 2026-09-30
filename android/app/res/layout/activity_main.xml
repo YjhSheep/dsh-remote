@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/page_bg"
+    android:orientation="vertical">
+
+    <!-- Page-coloured + hairline-separated, so it blends with the DSH page's own header. The root
+         is what MainActivity.applyImmersive() pads: on API 30+ the window draws under the status
+         and gesture bars (that padded area is this layout's page_bg, so it stays seamless) and the
+         page lifts its own bottom-anchored UI by the safe-bottom variable it publishes. -->
+    <android.widget.Toolbar
+        android:id="@+id/bar"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:background="@color/page_bg"
+        android:popupTheme="@style/AppPopupTheme"
+        android:subtitleTextAppearance="@style/AppBarSubtitle"
+        android:subtitleTextColor="@color/ink_dim"
+        android:titleTextAppearance="@style/AppBarTitle"
+        android:titleTextColor="@color/ink" />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/line" />
+
+    <ProgressBar
+        android:id="@+id/progress"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="2dp"
+        android:progress="0"
+        android:progressBackgroundTint="@color/line"
+        android:progressTint="@color/brand"
+        android:visibility="gone" />
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <WebView
+            android:id="@+id/web"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <ScrollView
+            android:id="@+id/overlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@color/page_bg"
+            android:fillViewport="true"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="28dp">
+
+                <TextView
+                    android:id="@+id/ov_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/err_title"
+                    android:textColor="@color/ink"
+                    android:textSize="20sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/ov_reason"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:lineSpacingExtra="3dp"
+                    android:textColor="@color/ink_dim"
+                    android:textIsSelectable="true"
+                    android:textSize="13sp" />
+
+                <Button
+                    android:id="@+id/ov_retry"
+                    style="@style/AppButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="22dp"
+                    android:background="@drawable/btn_primary"
+                    android:text="@string/err_retry"
+                    android:textColor="@color/on_brand" />
+
+                <Button
+                    android:id="@+id/ov_setup"
+                    style="@style/AppButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="10dp"
+                    android:background="@drawable/btn_ghost"
+                    android:text="@string/action_setup"
+                    android:textColor="@color/brand" />
+
+                <TextView
+                    android:id="@+id/ov_hint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="18dp"
+                    android:lineSpacingExtra="3dp"
+                    android:text="@string/err_body"
+                    android:textColor="@color/ink_dim"
+                    android:textSize="12sp" />
+            </LinearLayout>
+        </ScrollView>
+    </FrameLayout>
+</LinearLayout>

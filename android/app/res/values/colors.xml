@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="brand">#FF4D6BFE</color>
+    <color name="on_brand">#FFFFFFFF</color>
+    <color name="page_bg">#FFFFFFFF</color>
+    <color name="ink">#FF1A1A1A</color>
+    <color name="ink_dim">#FF8A8A8E</color>
+    <color name="line">#FFDCE0EA</color>
+    <color name="ok">#FF16A34A</color>
+    <color name="bad">#FFDC2626</color>
+    <!-- The launcher art's own background, so the adaptive icon's canvas matches the drawing. -->
+    <color name="ic_bg">#FFCAE3FE</color>
+</resources>

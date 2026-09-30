@@ -1,0 +1,180 @@
+/* Phone-sized viewports only.
+   Injected into the document by tools/dsh-lan-bridge.cjs, so editing this file
+   is live on the phone after a refresh — no DSH restart, no profile edit.
+
+   Everything here is driven by measurements, not guesses:
+     - tools/layout.json — geometry a real device reported through
+       tools/bridge/probe.js (Xiaomi MiuiBrowser, 400x700 CSS px, dpr 3).
+     - tools/phone-shot.cjs — the same page rendered headless at 400x700 with
+       CDP, for checking a change without a round trip to the phone.
+   Measured facts worth not re-deriving:
+     - DSH's own frame is fine at 400px: no horizontal overflow
+       (document scrollW 400 = clientW), rail 56px, composer card x72..377.
+     - The soft keyboard shrinks the layout viewport itself (innerHeight
+       700 -> 428, visualViewport == innerHeight, offsetTop 0), so position:fixed
+       and 100vh stay correct and no keyboard workaround is needed.
+     - env(safe-area-inset-*) is 0 on every side and the browser already keeps
+       its chrome out of the viewport: do NOT add viewport-fit=cover, it would
+       only push content under the status/gesture bars for no gain. */
+@media (max-width: 900px) {
+  /* dsh-whale-widget is a fixed 122px box pinned to the bottom-right
+     (.dshwv-root{position:fixed;right:0;bottom:0;--dshw-base:clamp(122px,...)}
+     — 122px is the clamp floor, so it cannot shrink), and its sprite is hit
+     testable: elementFromPoint(378,406) returns img.dshwv-img. Measured with the
+     keyboard up, it occupies y306..428 over the composer card's y207..321, i.e.
+     it sits on the send button. Get it out of the way only while typing — keyed off
+     html[data-dsh-kb], which tools/bridge/keyboard.js sets while the IME is up.
+     Not :focus: Android keeps the field focused after the IME is dismissed, so a
+     focus-based rule kept the widget hidden for good (the phone reported exactly
+     that: open the keyboard, close it, and the widget never came back). */
+  html[data-dsh-kb] .dshwv-root,
+  html[data-dsh-kb] .dshwv-menu,
+  /* Its z-index is 9999, above the settings dialog's overlay (1000), so it rides
+     over the dialog and covers the fields at the bottom right. */
+  body:has(.wCInkW_overlay) .dshwv-root,
+  body:has(.wCInkW_overlay) .dshwv-menu {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  /* The widget ships .dshwv-menu-btn at 26x26px, position:absolute;
+     top:calc(40.55% + 4px);right:4px — which lands straight on the sprite's head
+     (root-relative x82..118,y53..89 over the sprite's x49..122,y49..122). The phone
+     asked for it higher and smaller: at the box's top-right corner it clears the
+     sprite completely and only nicks the balloon's right arc. 30px stays tappable
+     at dpr 3 (90 device px). */
+  .dshwv-menu-btn {
+    top: 4px;
+    right: 4px;
+    width: 30px;
+    height: 30px;
+  }
+
+  /* Whale balloon text was painted outside the drawn bubble.
+     The bubble is an SVG path inside .dshwv-pop (viewBox 0 0 1026 700) whose
+     main arc is rx=373 ry=232 about (454,247) — an ellipse 746x464 units wide.
+     .dshwv-text is 66% x 64% of the pop = 677x448 units centred on the same
+     point, so its corners are 1.76 ellipse-radii out: a row at the top or bottom
+     of the block lands on the stroke (the phone showed the label crossing the
+     top stroke and the check-in chip below the bubble).
+     The block already fills the ellipse's whole height, so no re-arrangement can
+     fit it — what fits is a smaller version of it. Scale the block about the
+     bubble centre (the transform keeps the widget's own translate(-50%,-50%)
+     centring) and clip to the exact bubble ellipse as a guarantee for the modes
+     that lay out their own rows. */
+  .dshwv-text {
+    transform: translate(-50%, -50%) scale(0.75) !important;
+    /* 373/677 and 232/448: the bubble's radii as percentages of this box, which
+       is concentric with the bubble, so the clip is the bubble outline itself.
+       clip-path is applied before the transform, so divide by the 0.75 scale:
+       without that the clip shrinks to 0.75 of the bubble and cuts glyphs that
+       are inside it. */
+    clip-path: ellipse(73.5% 69.1% at 50% 50%);
+  }
+  .dshwv-text,
+  .dshwv-text .dshwv-label,
+  .dshwv-text .dshwv-amount,
+  .dshwv-text .dshwv-period,
+  .dshwv-text .dshwv-hint,
+  .dshwv-text .dshwv-wrap,
+  .dshwv-text .dshwv-trow {
+    /* The widget writes white-space as an inline style (the bundle contains
+       `whiteSpace = 'nowrap'`), which beats a plain rule — hence !important. */
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+  }
+
+  /* Settings dialog: SettingsRoot.module.css (@deepseek-ai/dsh-client-ui-
+     settings-general) only ships a desktop layout — .wCInkW_panel is
+     width:800px capped by max-width:calc(100vw - 48px) (352px here),
+     .wCInkW_nav is width:188px with flex:none, .wCInkW_content is flex:1. The
+     content column therefore gets 164px, minus .wCInkW_options' 0 24px padding
+     = 116px for the whole form, which is why every label wrapped to one
+     character per line and the plugin cards were clipped. Stack the nav into a
+     horizontal tab strip so the content gets the full panel width. */
+  .wCInkW_panel {
+    flex-direction: column;
+  }
+  .wCInkW_nav {
+    flex-direction: row;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    padding: 10px 12px 0;
+  }
+  /* The panel title sits in the same row now; without this it is squeezed to a
+     few pixels and breaks into one character per line ("设" over "置"). */
+  .wCInkW_navTitle {
+    flex: none;
+    white-space: nowrap;
+    padding: 0 8px 0 4px;
+  }
+  .wCInkW_navList {
+    flex: 1 1 auto;
+    min-width: 0;
+    flex-direction: row;
+    gap: 4px;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .wCInkW_navCell {
+    flex: none;
+    height: 36px;
+    padding: 7px 12px;
+  }
+  .wCInkW_content {
+    width: 100%;
+    /* In a column panel, flex:1 1 0% still refuses to shrink below its content
+       (min-height:auto), which measured 1337px inside a 652px panel — clipped by
+       .wCInkW_panel{overflow:hidden} with no way to scroll. This lets
+       .wCInkW_options (flex:1;min-height:0;overflow-y:auto) do the scrolling. */
+    min-height: 0;
+  }
+  .wCInkW_header {
+    height: auto;
+    padding: 6px 10px 0;
+  }
+  .wCInkW_options {
+    padding: 0 12px 12px;
+  }
+
+  /* 插件市场 (the dshmarket plugin, .nUhMVa_*) builds its header and tab strip as
+     nowrap flex rows sized for a desktop panel: at 352px the h2 title collapsed to
+     31x96 (one character per line — 插件市场 stacked) and .nUhMVa_tabs overflowed
+     by 99px (clientWidth 352 vs scrollWidth 451; 高级 and 任务 sat off the right
+     edge). Let the header wrap and scroll the tab strip, as with the settings nav. */
+  .nUhMVa_titleRow {
+    flex-wrap: wrap;
+    align-items: center;
+    row-gap: 8px;
+  }
+  .nUhMVa_title {
+    flex: none;
+    white-space: nowrap;
+  }
+  .nUhMVa_tabs {
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  /* Immersive system bars (the App only). MainActivity makes the window edge-to-edge and publishes
+     the gesture bar's height as --dsh-safe-bottom, already converted to CSS px; the phone browser
+     never sets the property, so every rule below collapses to 0 there and costs nothing. Without
+     them the pill lands on the composer's meta row and on the whale widget's sprite. The App also
+     zeroes the value while the keyboard is up, because the WebView already ends above it. */
+  .dshwv-root {
+    /* Not `bottom`: the widget positions itself with an inline `inset: <top>px auto auto <left>px`
+       (fed by --dshw-vx/--dshw-vy), so the only lever that survives is a negative margin. The
+       sprite otherwise sits inside the system's bottom gesture zone, where a swipe up leaves the
+       app instead of dragging the pet. */
+    margin-top: calc(-1 * var(--dsh-safe-bottom, 0px));
+  }
+  .BynINW_centerCol {
+    /* The whole conversation column, not the composer: in the empty/hero state the composer floats
+       in the middle of the column and only .BynINW_centerCol reaches the bottom of the window. */
+    padding-bottom: var(--dsh-safe-bottom, 0px);
+  }
+  /* Settings dialog: centred with a 24px inset, which the gesture bar eats into. */
+  .wCInkW_overlay {
+    padding-bottom: calc(24px + var(--dsh-safe-bottom, 0px));
+  }
+}
