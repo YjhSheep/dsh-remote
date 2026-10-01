@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    android:versionCode="1"
-    android:versionName="0.1">
+    android:versionCode="2"
+    android:versionName="0.2">
 
     <uses-permission android:name="android.permission.INTERNET" />
 
@@ -9,14 +9,14 @@
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
         android:usesCleartextTraffic="true"
         android:theme="@style/AppTheme">
-        <!-- Native screens: sessions list and one chat. Material theme with no action bar, because
-             the layout carries its own Toolbar. -->
+        <!-- The activities carry no label of their own: they inherit @string/app_name, so a copy
+             here would only be a second place to keep in sync. -->
         <activity
             android:name="app.dsh.remote.MainActivity"
             android:exported="true"
-            android:label="@string/app_name"
             android:theme="@style/NativeTheme"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
             android:windowSoftInputMode="adjustResize">
@@ -29,7 +29,6 @@
         <activity
             android:name="app.dsh.remote.ChatActivity"
             android:exported="false"
-            android:label="@string/app_name"
             android:theme="@style/NativeTheme"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
             android:windowSoftInputMode="adjustResize" />
@@ -38,7 +37,6 @@
         <activity
             android:name="app.dsh.remote.WebActivity"
             android:exported="false"
-            android:label="@string/app_name"
             android:theme="@style/AppTheme"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
             android:windowSoftInputMode="adjustResize" />

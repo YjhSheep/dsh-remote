@@ -5,6 +5,9 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.res.Configuration;
+import android.os.Build;
 import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.Menu;
@@ -198,7 +201,7 @@ public class MainActivity extends AppCompatActivity {
                       adapter.setSessions(items);
                       bar.setSubtitle(R.string.st_connected);
                       if (adapter.count() == 0) {
-                        show("电脑上还没有会话，点右下角新建一个");
+                        show(getString(R.string.sessions_empty));
                       } else {
                         stateBox.setVisibility(View.GONE);
                       }
@@ -363,6 +366,15 @@ public class MainActivity extends AppCompatActivity {
             StringBuilder sb = new StringBuilder();
             sb.append("目标 ").append(scheme).append("://").append(host).append(':').append(port).append('\n');
             sb.append("密钥 ").append(key.isEmpty() ? "没填" : key.length() + " 位").append('\n');
+            // 真机上的问题往往不在协议而在渲染，所以把设备环境一起带回电脑。
+            boolean dark =
+                (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
+                    == Configuration.UI_MODE_NIGHT_YES;
+            sb.append("设备 ").append(Build.MANUFACTURER).append(' ').append(Build.MODEL)
+                .append(" / Android ").append(Build.VERSION.RELEASE)
+                .append("（API ").append(Build.VERSION.SDK_INT).append("）\n");
+            sb.append("界面 ").append(dark ? "深色" : "浅色")
+                .append(" / App ").append(appVersion()).append('\n');
 
             DshClient c = new DshClient(host, port, key, scheme);
             JSONObject picked = null;
@@ -524,6 +536,17 @@ public class MainActivity extends AppCompatActivity {
   }
 
   // ------------------------------------------------------------------ 杂项
+
+  /** 装了哪个包（真机回报问题时第一句就该答这个）。 */
+  private String appVersion() {
+    try {
+      return getPackageManager()
+          .getPackageInfo(getPackageName(), 0)
+          .versionName;
+    } catch (PackageManager.NameNotFoundException e) {
+      return "?";
+    }
+  }
 
   private void show(String msg) {
     state.setText(msg);

@@ -21,6 +21,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:hint="@string/setup_hint_link"
+            android:importantForAutofill="no"
             android:inputType="textUri"
             android:maxLines="2" />
 
@@ -37,6 +38,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:hint="@string/setup_hint_key"
+            android:importantForAutofill="no"
             android:inputType="text" />
 
         <Button

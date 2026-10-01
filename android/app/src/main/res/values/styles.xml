@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <!-- No action bar: the layout carries its own Toolbar. On API 30+ MainActivity draws under the
          system bars (transparent status and gesture bars, insets applied to the root as padding),
          so the page's own background reaches the screen edge and the gesture pill floats over it;
@@ -12,7 +12,10 @@
         <item name="android:windowBackground">@color/page_bg</item>
         <item name="android:statusBarColor">@color/page_bg</item>
         <item name="android:windowLightStatusBar">true</item>
-        <item name="android:windowLightNavigationBar">true</item>
+        <!-- A 27+ attribute while minSdk is 26; on API 26 the framework has no such item, ignores
+             it, and the dark nav bar there keeps its own default icons. Ui/applyImmersive set the
+             icon colour programmatically where it matters. -->
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">true</item>
     </style>
 
     <!-- The native screens (sessions + chat) are AppCompat/Material activities, so they need an
@@ -27,7 +30,7 @@
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">true</item>
-        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">true</item>
     </style>
 
     <style name="AppPopupTheme" parent="@android:style/ThemeOverlay.Material.Light" />

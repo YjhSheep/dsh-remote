@@ -283,7 +283,7 @@ public class ChatActivity extends AppCompatActivity {
 
   private void setRunning(boolean value) {
     running = value;
-    send.setText(value ? "停止" : "发送");
+    send.setText(value ? R.string.stop : R.string.send);
     send.setEnabled(client != null);
   }
 

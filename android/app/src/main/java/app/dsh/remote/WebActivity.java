@@ -6,7 +6,6 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
-import android.graphics.Insets;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -15,7 +14,6 @@ import android.view.LayoutInflater;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.Window;
-import android.view.WindowInsets;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
@@ -28,6 +26,11 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.widget.Toolbar;
+
+import androidx.core.graphics.Insets;
+import androidx.core.view.OnApplyWindowInsetsListener;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -158,9 +161,14 @@ public class WebActivity extends Activity {
    * goes to the page as --dsh-safe-bottom so its bottom-anchored UI lifts itself; see
    * tools/bridge/mobile.css.
    *
-   * <p>API 30+ only: below that there is no WindowInsets.Type, the window does its own keyboard
-   * resizing, and guessing the keyboard inset from getSystemWindowInsetBottom() would break the
-   * keyboard. Older devices keep the legacy opaque bars and non-edge-to-edge layout.
+   * <p>API 30+ only: below that the window resizes for the keyboard itself, and guessing the
+   * keyboard inset from getSystemWindowInsetBottom() would break the keyboard. Older devices keep
+   * the legacy opaque bars and non-edge-to-edge layout.
+   *
+   * <p>The insets go through androidx.core rather than the platform WindowInsets: the platform
+   * version of getInsets()/WindowInsets.Type only exists from API 29/30, and this activity is also
+   * installed on API 26 phones (lint NewApi on the plain calls; androidx also covers API 26 with the
+   * same {@link WindowInsetsCompat} types).
    */
   private void applyImmersive() {
     if (Build.VERSION.SDK_INT < 30) return;
@@ -171,24 +179,25 @@ public class WebActivity extends Activity {
     // Without this the system paints a translucent scrim behind the gesture bar, i.e. exactly the
     // band we are trying to get rid of.
     w.setNavigationBarContrastEnforced(false);
-    findViewById(R.id.root)
-        .setOnApplyWindowInsetsListener(
-            new View.OnApplyWindowInsetsListener() {
-              @Override
-              public WindowInsets onApplyWindowInsets(View v, WindowInsets insets) {
-                Insets bars =
-                    insets.getInsets(
-                        WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
-                int ime = insets.getInsets(WindowInsets.Type.ime()).bottom;
-                v.setPadding(bars.left, bars.top, bars.right, ime);
-                gestureInsetPx = bars.bottom;
-                // With the keyboard up this WebView already ends above it, so the page must not add
-                // the gesture-bar gap on top of that.
-                safeInsetPx = ime > 0 ? 0 : bars.bottom;
-                applySafeBottom(safeInsetPx);
-                return insets;
-              }
-            });
+    ViewCompat.setOnApplyWindowInsetsListener(
+        findViewById(R.id.root),
+        new OnApplyWindowInsetsListener() {
+          @Override
+          public WindowInsetsCompat onApplyWindowInsets(View v, WindowInsetsCompat insets) {
+            Insets bars =
+                insets.getInsets(
+                    WindowInsetsCompat.Type.systemBars()
+                        | WindowInsetsCompat.Type.displayCutout());
+            int ime = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom;
+            v.setPadding(bars.left, bars.top, bars.right, ime);
+            gestureInsetPx = bars.bottom;
+            // With the keyboard up this WebView already ends above it, so the page must not add
+            // the gesture-bar gap on top of that.
+            safeInsetPx = ime > 0 ? 0 : bars.bottom;
+            applySafeBottom(safeInsetPx);
+            return insets;
+          }
+        });
   }
 
   /** Tell the page how much room its bottom-anchored UI must leave, in CSS px (insets are device
