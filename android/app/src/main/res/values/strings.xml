@@ -36,4 +36,9 @@
     <string name="stop">停止</string>
     <string name="new_session">新建会话</string>
     <string name="sessions_empty">电脑上还没有会话，点右下角新建一个</string>
+    <string name="action_check">自检</string>
+    <string name="check_running">正在自检…</string>
+    <string name="check_title">自检结果</string>
+    <string name="check_copy">复制</string>
+    <string name="check_copied">已复制</string>
 </resources>

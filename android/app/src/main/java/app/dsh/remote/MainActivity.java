@@ -1,5 +1,9 @@
 package app.dsh.remote;
 
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.os.Bundle;
 import android.view.LayoutInflater;
@@ -21,8 +25,10 @@ import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 原生首页：列出电脑上的会话，点进去聊天。
@@ -334,6 +340,159 @@ public class MainActivity extends AppCompatActivity {
             });
   }
 
+  // ------------------------------------------------------------------ 自检
+
+  /**
+   * 手机上的一键自检：把电脑上 tools\client-check 验的三件事在这儿跑一遍（HTTP 通不通、WebSocket 收不收
+   * 得到 ready、会话流拿不拿得到 snapshot），排障不用插数据线；结果可以复制粘回来。
+   */
+  private void selfCheck() {
+    if (!Prefs.ready(this)) {
+      setup();
+      return;
+    }
+    final String host = Prefs.host(this);
+    final int port = Prefs.port(this);
+    final String key = Prefs.key(this);
+    final String scheme = Prefs.scheme(this);
+    toast(getString(R.string.check_running));
+    io.execute(
+        new Runnable() {
+          @Override
+          public void run() {
+            StringBuilder sb = new StringBuilder();
+            sb.append("目标 ").append(scheme).append("://").append(host).append(':').append(port).append('\n');
+            sb.append("密钥 ").append(key.isEmpty() ? "没填" : key.length() + " 位").append('\n');
+
+            DshClient c = new DshClient(host, port, key, scheme);
+            JSONObject picked = null;
+            try {
+              JSONObject args = new JSONObject();
+              args.put("_request", new JSONObject());
+              JSONObject res = c.call("session/list", args);
+              JSONArray items = res.optJSONArray("items");
+              int total = items == null ? 0 : items.length();
+              if (items != null) {
+                for (int i = 0; i < items.length(); i++) {
+                  JSONObject it = items.optJSONObject(i);
+                  if (it != null && !"subagent".equals(it.optString("origin", ""))) {
+                    picked = it;
+                    break;
+                  }
+                }
+              }
+              sb.append(
+                  total == 0
+                      ? "1. HTTP 通了，但电脑上一个会话都没有\n"
+                      : "1. HTTP 通了，会话 " + total + " 个\n");
+            } catch (Exception e) {
+              sb.append("1. HTTP 不通：").append(friendly(e)).append('\n');
+            }
+
+            final CountDownLatch ready = new CountDownLatch(1);
+            c.open(
+                "$events",
+                new JSONObject(),
+                new DshClient.Stream() {
+                  @Override
+                  public void onItem(JSONObject value) {
+                    if ("ready".equals(value.optString("type", ""))) ready.countDown();
+                  }
+
+                  @Override
+                  public void onEnd() {}
+                });
+            try {
+              sb.append(
+                  ready.await(8, TimeUnit.SECONDS)
+                      ? "2. WebSocket 通了（收到 ready）\n"
+                      : "2. WebSocket 没通：8 秒没等到 ready\n");
+            } catch (InterruptedException e) {
+              sb.append("2. WebSocket 检查被打断\n");
+            }
+
+            final JSONObject chosen = picked;
+            JSONObject follow = chosen == null ? null : followArgs(chosen.optString("sessionId", ""));
+            if (follow == null) {
+              sb.append("3. 跳过会话流：没有可打开的会话\n");
+            } else {
+              final CountDownLatch snapshot = new CountDownLatch(1);
+              final String[] failed = new String[1];
+              c.open(
+                  "session/follow",
+                  follow,
+                  new DshClient.Stream() {
+                    @Override
+                    public void onItem(JSONObject value) {
+                      if ("snapshot".equals(value.optString("type", ""))) snapshot.countDown();
+                    }
+
+                    @Override
+                    public void onError(String code, String message) {
+                      failed[0] = code + "，" + message;
+                    }
+
+                    @Override
+                    public void onEnd() {}
+                  });
+              try {
+                sb.append(
+                    snapshot.await(10, TimeUnit.SECONDS)
+                        ? "3. 会话流通了（拿到 snapshot）\n"
+                        : "3. 会话流没通："
+                            + (failed[0] == null ? "10 秒没等到 snapshot" : failed[0])
+                            + "\n");
+              } catch (InterruptedException e) {
+                sb.append("3. 会话流检查被打断\n");
+              }
+            }
+            c.close();
+
+            final String report = sb.toString();
+            runOnUiThread(
+                new Runnable() {
+                  @Override
+                  public void run() {
+                    new AlertDialog.Builder(MainActivity.this)
+                        .setTitle(R.string.check_title)
+                        .setMessage(report)
+                        .setPositiveButton(android.R.string.ok, null)
+                        .setNeutralButton(
+                            R.string.check_copy,
+                            new DialogInterface.OnClickListener() {
+                              @Override
+                              public void onClick(DialogInterface d, int which) {
+                                ClipboardManager cm =
+                                    (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                                cm.setPrimaryClip(ClipData.newPlainText("dsh-selfcheck", report));
+                                toast(getString(R.string.check_copied));
+                              }
+                            })
+                        .show();
+                  }
+                });
+          }
+        });
+  }
+
+  /** session/follow 的参数（键名错一个服务端就拒，所以集中在这儿，别散落各处）。 */
+  private static JSONObject followArgs(String sessionId) {
+    try {
+      JSONObject address = new JSONObject();
+      address.put("kind", "session");
+      address.put("sessionId", sessionId);
+      JSONObject request = new JSONObject();
+      request.put("address", address);
+      request.put("assistantStream", true);
+      request.put("maxMessages", 50);
+      JSONObject args = new JSONObject();
+      args.put("request", request);
+      return args;
+    } catch (Exception e) {
+      return null;
+    }
+  }
+
   // ------------------------------------------------------------------ 菜单
 
   @Override
@@ -347,6 +506,10 @@ public class MainActivity extends AppCompatActivity {
     int id = item.getItemId();
     if (id == R.id.action_refresh) {
       refresh();
+      return true;
+    }
+    if (id == R.id.action_check) {
+      selfCheck();
       return true;
     }
     if (id == R.id.action_setup) {
