@@ -90,20 +90,22 @@ if (-not (Test-Path $exe)) {
 }
 if ($NoStart) { Say "no-start: done"; exit 0 }
 
-# ---------- start hidden, capture the console status into logs ----------
-Get-Process natapp -ErrorAction SilentlyContinue | ForEach-Object { Say ("stopping old natapp pid " + $_.Id); $_.Kill() }
-Start-Sleep -Milliseconds 500
-Remove-Item $log,$errlog -ErrorAction SilentlyContinue
-Say "starting: natapp.exe -authtoken=**** -log=stdout"
-# -log=stdout is not optional: without it the client prints the auth banner but never the forwarding
-# url, so the log can only be misread (an earlier version picked up the vendor host auth.natapp.cn).
-$p = Start-Process -FilePath $exe -ArgumentList @("-authtoken=" + $Token, "-log=stdout") -WorkingDirectory $Dir `
-     -WindowStyle Hidden -RedirectStandardOutput $log -RedirectStandardError $errlog -PassThru
-Say ("pid " + $p.Id)
+# ---------- start detached (or reuse the tunnel that is already up) ----------
+# The tunnel is launched through tools\natapp-start.vbs, never by Start-Process here: a child
+# started from this script would inherit the caller's pipe, and a caller that pipes this script
+# into Select-Object would then hang forever waiting for a process that outlives it.
+$already = @(Get-Process natapp -ErrorAction SilentlyContinue).Count -gt 0
+if ($already) {
+  Say "natapp is already running - reusing it (stop it with tools\natapp-task.ps1 -Off)"
+} else {
+  Remove-Item $log,$errlog -ErrorAction SilentlyContinue
+  Say "starting detached: wscript tools\natapp-start.vbs  (client gets -log=stdout, see natapp-run.cmd)"
+  & wscript.exe (Join-Path $Tools "natapp-start.vbs")
+}
 
 # ---------- find the public url in the log ----------
-# Strict: the client's own "Tunnel established at <url>" / "forwarding=<url>".
-# Loose fallback: any url in the log, minus vendor infrastructure hosts (*.natapp.cn).
+# Strict: the client's own "Tunnel established at <url>" / "forwarding=<url>"; the log is appended
+# to across runs, so take the LAST match. Loose fallback: any url, minus vendor hosts (*.natapp.cn).
 $domain = $null; $scheme = "http"
 $rStrict = [regex]'(?:Tunnel established at|forwarding=)\s*(https?://[^\s"]+)'
 $rLoose  = [regex]'https?://([A-Za-z0-9][A-Za-z0-9.\-]*\.[A-Za-z]{2,})(?::\d+)?'
@@ -111,19 +113,20 @@ for ($i = 1; $i -le 30; $i++) {
   Start-Sleep -Seconds 1
   if (Test-Path $log) {
     $raw = Get-Content $log -Raw
-    $m = $rStrict.Match($raw)
-    if ($m.Success) {
+    $ms = $rStrict.Matches($raw)
+    if ($ms.Count -gt 0) {
+      $m = $ms[$ms.Count - 1]
       $domain = ([regex]'^https?://([^/]+)').Match($m.Groups[1].Value).Groups[1].Value
       if ($m.Groups[1].Value -like "https*") { $scheme = "https" }
       break
     }
     foreach ($c in $rLoose.Matches($raw)) {
       $h = $c.Groups[1].Value
-      if ($h -notmatch '(^|\.)natapp\.cn$') { $domain = $h; break }
+      if ($h -notmatch '(^|\.)natapp\.cn$') { $domain = $h }
     }
     if ($domain) { break }
   }
-  if ($p.HasExited) { Say ("natapp exited early, code " + $p.ExitCode); break }
+  if (-not (Get-Process natapp -ErrorAction SilentlyContinue)) { Say "natapp is not running"; break }
 }
 if (-not $domain) {
   Say "NO PUBLIC URL in the log yet. last lines:"
@@ -150,7 +153,13 @@ if ($serial) {
   $code = (& $adb -s $sid shell ("curl -s --max-time " + $PhoneWaitSec + " -o /dev/null -w '%{http_code}' '" + $scheme + "://" + $domain + "/?k=" + $k + "'") 2>$null | Out-String).Trim()
   Say ("phone http_code=" + $code + "   (303 = tunnel reaches the bridge and the key is right; 000 = no route)")
   if ($code -eq "303") {
-    $api = (& $adb -s $sid shell ("curl -s --max-time " + $PhoneWaitSec + " -H 'Cookie: dsh-bridge=" + $k + "' -H 'Content-Type: application/json' -d '{\""type\"":\""client-request\"",\""rpcId\"":\""aaaa1111-2222-3333-4444-555566667777\"",\""method\"":\""session/list\"",\""payload\"":{\""args\"":{\""_request\"":{}}}}' -o /dev/null -w '%{http_code}' '" + $scheme + "://" + $domain + "/api/session/list") 2>$null | Out-String).Trim()
+    # The json body travels as a pushed file. Quoting it inline through PowerShell + adb shell
+    # mangles the braces and the gateway honestly answers 400 (bad json) on a healthy tunnel.
+    $body = '{"type":"client-request","rpcId":"aaaa1111-2222-3333-4444-555566667777","method":"session/list","payload":{"args":{"_request":{}}}}'
+    $req = Join-Path $Root "android\.tmp\natapp-req.json"
+    [System.IO.File]::WriteAllText($req, $body, (New-Object System.Text.ASCIIEncoding))
+    & $adb -s $sid push $req /data/local/tmp/natapp-req.json 2>$null | Out-Null
+    $api = (& $adb -s $sid shell ("curl -s --max-time " + $PhoneWaitSec + " -H 'Cookie: dsh-bridge=" + $k + "' -H 'Content-Type: application/json' -d @/data/local/tmp/natapp-req.json -o /dev/null -w '%{http_code}' '" + $scheme + "://" + $domain + "/api/session/list'") 2>$null | Out-String).Trim()
     Say ("phone api http_code=" + $api + "   (200 = the phone is really driving DSH)")
   }
 } else {
