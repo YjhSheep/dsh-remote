@@ -43,7 +43,7 @@ import java.net.Socket;
  * <p>The shell is deliberately plain framework widgets (no AndroidX): three states only - loading,
  * connected, or a page that names the address and the reason it failed.
  */
-public class MainActivity extends Activity {
+public class WebActivity extends Activity {
   private static final String TAG = "dsh-remote";
   private static final String PREFS = "dsh-remote";
   private static final int LOCAL_PORT = 17800;

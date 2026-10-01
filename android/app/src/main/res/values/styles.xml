@@ -15,6 +15,21 @@
         <item name="android:windowLightNavigationBar">true</item>
     </style>
 
+    <!-- The native screens (sessions + chat) are AppCompat/Material activities, so they need an
+         AppCompat-family theme; WebActivity keeps AppTheme because it is a plain Activity. -->
+    <style name="NativeTheme" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/brand</item>
+        <item name="colorOnPrimary">@color/on_brand</item>
+        <item name="android:colorBackground">@color/page_bg</item>
+        <item name="colorSurface">@color/page_bg</item>
+        <item name="colorOnSurface">@color/ink</item>
+        <item name="android:windowBackground">@color/page_bg</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+
     <style name="AppPopupTheme" parent="@android:style/ThemeOverlay.Material.Light" />
 
     <style name="AppButton" parent="@android:style/Widget.Material.Button.Borderless">

@@ -11,6 +11,16 @@ android/dl/
 android/build/
 tmp/
 
+# ---- Gradle 构建（工具链可重下，产物可重建）----
+# android/tools/ ：JDK 17 + Gradle 8.9 解包，约 700 MB
+android/tools/
+android/local.properties
+android/.gradle/
+android/.gradle-home/
+android/.tmp/
+android/.android-home/
+android/app/build/
+
 # ---- 编辑器 / 系统 ----
 .vscode/
 .idea/

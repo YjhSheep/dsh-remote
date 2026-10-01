@@ -33,17 +33,19 @@ Remove-Item -Recurse -Force $Work -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path "$Work\gen", "$Work\classes", "$Work\dex", $Dist | Out-Null
 
 Write-Host "[1/6] aapt2 compile"
-& $aapt2 compile --dir (Join-Path $App "res") -o "$Work\res.zip"
+& $aapt2 compile --dir (Join-Path $App "src\main\res") -o "$Work\res.zip"
 if ($LASTEXITCODE -ne 0) { throw "aapt2 compile failed" }
 
 Write-Host "[2/6] aapt2 link"
-& $aapt2 link -o "$Work\base.apk" -I $androidJar --manifest (Join-Path $App "AndroidManifest.xml") `
+# The manifest deliberately omits `package` (AGP 8 owns the namespace), so aapt2 is told here.
+& $aapt2 link -o "$Work\base.apk" -I $androidJar --manifest (Join-Path $App "src\main\AndroidManifest.xml") `
+  --rename-manifest-package app.dsh.remote `
   --java "$Work\gen" --min-sdk-version $MinSdk --target-sdk-version $TargetSdk `
   --version-code $VersionCode --version-name $VersionName "$Work\res.zip"
 if ($LASTEXITCODE -ne 0) { throw "aapt2 link failed" }
 
 Write-Host "[3/6] javac"
-$sources = Get-ChildItem (Join-Path $App "java"), "$Work\gen" -Recurse -Filter *.java | ForEach-Object FullName
+$sources = Get-ChildItem (Join-Path $App "src\main\java"), "$Work\gen" -Recurse -Filter *.java | ForEach-Object FullName
 # -encoding: the sources are UTF-8, while javac otherwise assumes the platform charset (GBK here)
 # and rejects the Chinese UI strings as unmappable.
 & $javac -source 8 -target 8 -nowarn -encoding UTF-8 -bootclasspath $androidJar -d "$Work\classes" @sources
