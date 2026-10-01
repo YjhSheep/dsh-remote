@@ -134,13 +134,18 @@ if ($already) {
 }
 
 # ---------- wait for the client to log in ----------
+# wscript -> cmd -> frpc takes a moment to appear, so never give up before the process has been
+# seen at least once: checking once and bailing made a healthy cold start look like a failure.
 $ok = $false
+$seen = $false
 for ($i = 1; $i -le 30; $i++) {
   Start-Sleep -Seconds 1
+  $alive = [bool](Get-Process frpc -ErrorAction SilentlyContinue)
+  if ($alive) { $seen = $true }
   if (Test-Path $log) {
     if ((Get-Content $log -Raw) -match 'start proxy success') { $ok = $true; break }
   }
-  if (-not (Get-Process frpc -ErrorAction SilentlyContinue)) { Say "frpc is not running"; break }
+  if ($seen -and -not $alive) { Say "frpc exited"; break }
 }
 if ($ok) {
   Say "frpc: start proxy success (frps accepted the tunnel)"
