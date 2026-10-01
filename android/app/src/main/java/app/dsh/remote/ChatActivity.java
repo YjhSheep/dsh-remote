@@ -3,6 +3,7 @@ package app.dsh.remote;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.MenuItem;
 import android.view.View;
 import android.widget.EditText;
@@ -37,6 +38,9 @@ import java.util.concurrent.Executors;
 public class ChatActivity extends AppCompatActivity {
 
   public static final String EXTRA_SESSION = "session";
+
+  /** 与 MainActivity 共用一个日志标签，真机验收时 adb logcat -s dsh-remote:I 一条命令收齐。 */
+  private static final String TAG = "dsh-remote";
 
   private Toolbar bar;
   private ScrollView scroller;
@@ -182,6 +186,14 @@ public class ChatActivity extends AppCompatActivity {
         JSONObject event = record.optJSONObject("event");
         if (event != null) handle(event);
       }
+      Log.i(
+          TAG,
+          "chat snapshot session="
+              + sessionId
+              + " records="
+              + (records == null ? 0 : records.length())
+              + " slots="
+              + transcript.getChildCount());
       scrollToEnd();
       return;
     }
@@ -223,7 +235,19 @@ public class ChatActivity extends AppCompatActivity {
         return;
       }
       slot(key, R.color.bubble_agent, false).setText(text);
-      if (!data.optBoolean("stream", false)) setRunning(false);
+      if (!data.optBoolean("stream", false)) {
+        Log.i(
+            TAG,
+            "assistant done turn="
+                + data.optInt("turn", 0)
+                + " step="
+                + data.optInt("step", 0)
+                + " chars="
+                + text.length()
+                + " slots="
+                + transcript.getChildCount());
+        setRunning(false);
+      }
       return;
     }
 
@@ -311,6 +335,7 @@ public class ChatActivity extends AppCompatActivity {
                       "mode", "queue",
                       "content", parts(text));
               c.call("session/prompt", obj("request", request));
+              Log.i(TAG, "prompt sent session=" + sessionId + " chars=" + text.length());
             } catch (final Exception e) {
               runOnUiThread(
                   new Runnable() {

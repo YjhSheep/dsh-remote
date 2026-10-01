@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.os.Build;
+import android.util.Log;
 import android.view.View;
 import android.view.Window;
 
@@ -65,6 +66,11 @@ public final class Ui {
                 v.getPaddingTop(),
                 v.getPaddingRight(),
                 Math.max(ime.bottom, bars.bottom));
+            // 真机上「小白条/键盘压住内容」这类问题只能量出来，所以把每次 insets 报给 logcat：
+            //   adb logcat -s dsh-remote:I
+            Log.i(
+                "dsh-remote",
+                "insets bars=" + bars.top + "," + bars.bottom + " ime=" + ime.bottom + " night=" + night);
             return insets;
           }
         });

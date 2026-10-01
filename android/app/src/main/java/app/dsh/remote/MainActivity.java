@@ -9,6 +9,7 @@ import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.os.Build;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -40,6 +41,9 @@ import java.util.concurrent.TimeUnit;
  * {@link WebActivity} 里当退路。
  */
 public class MainActivity extends AppCompatActivity {
+
+  /** 真机验收用的日志通道：uiautomator 在 MIUI 上取不到界面，只能靠 App 自己回报状态。 */
+  private static final String TAG = "dsh-remote";
 
   private Toolbar bar;
   private RecyclerView list;
@@ -91,11 +95,42 @@ public class MainActivity extends AppCompatActivity {
   @Override
   protected void onStart() {
     super.onStart();
+    boolean dark =
+        (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
+            == Configuration.UI_MODE_NIGHT_YES;
+    Log.i(
+        TAG,
+        "start ready="
+            + Prefs.ready(this)
+            + " dark="
+            + dark
+            + " api="
+            + Build.VERSION.SDK_INT
+            + " app="
+            + appVersion());
     if (!Prefs.ready(this)) {
       setup();
       return;
     }
     connect();
+    maybeSelfCheck();
+  }
+
+  @Override
+  protected void onNewIntent(Intent intent) {
+    super.onNewIntent(intent);
+    // MIUI 上 Activity 已经在前台时再 am start 只走 onNewIntent，不重跑 onStart，
+    // 无头自检（--ez selfcheck true）必须在这里也接一次才不会被吞掉。
+    setIntent(intent);
+    maybeSelfCheck();
+  }
+
+  // 数据线验收用：adb shell am start -n app.dsh.remote/.MainActivity --ez selfcheck true
+  private void maybeSelfCheck() {
+    if (getIntent() != null && getIntent().getBooleanExtra("selfcheck", false)) {
+      getIntent().removeExtra("selfcheck");
+      selfCheck();
+    }
   }
 
   @Override
@@ -200,6 +235,14 @@ public class MainActivity extends AppCompatActivity {
                       JSONArray items = res.optJSONArray("items");
                       adapter.setSessions(items);
                       bar.setSubtitle(R.string.st_connected);
+                      Log.i(
+                          TAG,
+                          "sessions n="
+                              + adapter.count()
+                              + " first="
+                              + adapter.titleAt(0)
+                              + " ws="
+                              + workspaceId);
                       if (adapter.count() == 0) {
                         show(getString(R.string.sessions_empty));
                       } else {
@@ -461,6 +504,7 @@ public class MainActivity extends AppCompatActivity {
             c.close();
 
             final String report = sb.toString();
+            for (String line : report.split("\n")) Log.i(TAG, "SELFCHECK " + line);
             runOnUiThread(
                 new Runnable() {
                   @Override

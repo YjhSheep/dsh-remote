@@ -54,8 +54,12 @@ public final class SessionAdapter extends RecyclerView.Adapter<SessionAdapter.Ho
       JSONObject values = null;
       JSONObject projections = o.optJSONObject("projections");
       if (projections != null) values = projections.optJSONObject("values");
-      String title = values == null ? null : values.optString("title", "");
-      if (title == null || title.trim().isEmpty()) title = "未命名会话 · " + tail(o.optString("sessionId", ""));
+      // 真机上实测：子代理会话的 title 是 JSON null，org.json 的 optString 会把它变成字符串
+      // "null"（fallback 只管字段缺失），不判掉列表里就会显示字面量 null。
+      String title = values == null ? "" : values.optString("title", "").trim();
+      if (title.isEmpty() || "null".equals(title)) {
+        title = "未命名会话 · " + tail(o.optString("sessionId", ""));
+      }
       StringBuilder sub = new StringBuilder();
       boolean running = o.optBoolean("running", false);
       // 子代理会话也在这个列表里（实测 origin=subagent），标出来免得和主会话混在一起。
@@ -85,6 +89,11 @@ public final class SessionAdapter extends RecyclerView.Adapter<SessionAdapter.Ho
 
   public int count() {
     return rows.size();
+  }
+
+  /** 真机验收时把渲染的内容回传到 logcat（uiautomator 在 MIUI 上取不到界面文本）。 */
+  public String titleAt(int i) {
+    return i >= 0 && i < rows.size() ? rows.get(i).title : "";
   }
 
   private static String basename(String path) {
