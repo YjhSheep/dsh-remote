@@ -109,9 +109,14 @@ WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
 systemctl enable --now frps >/dev/null 2>&1 || true
-systemctl restart frps
+# Never let a failing restart abort the script before it prints the summary.
+systemctl restart frps || echo "WARNING: 'systemctl restart frps' failed"
 sleep 2
 echo "[4/5] frps.service: $(systemctl is-active frps) / $(systemctl is-enabled frps)"
+if [ "$(systemctl is-active frps)" != "active" ]; then
+  echo "      frps is NOT running. last log lines:"
+  journalctl -u frps -n 20 --no-pager 2>/dev/null || true
+fi
 
 # --- 5. host firewall (the Alibaba Cloud security group is NOT touched) ----
 if systemctl is-active --quiet firewalld; then
@@ -132,6 +137,6 @@ ss -lntp 2>/dev/null | grep -E ":(7000|7500|8443)\b" || echo "  (nothing yet - t
 echo
 echo "NEXT, in the Alibaba Cloud console (this script cannot do it):"
 echo "  ECS -> Security Groups -> inbound -> add TCP ${BIND_PORT} and TCP ${PUBLIC_PORT} (source 0.0.0.0/0)"
-echo "THEN, on the PC:"
-echo "  powershell -File tools\\frp-setup.ps1 -Token ${TOKEN}"
+echo "THEN, on the PC (the token is already stored in tools\\.frp-token):"
+echo "  powershell -NoProfile -ExecutionPolicy Bypass -File tools\\frp-setup.ps1"
 echo "========================================="
