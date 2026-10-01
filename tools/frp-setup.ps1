@@ -76,10 +76,10 @@ function Fetch([string]$Url, [string]$Out) {
 # ---------- frpc.exe ----------
 if (-not (Test-Path $exe)) {
   $zip = Join-Path $Dir "frp.zip"
-  $url = "https://github.com/fatedier/frp/releases/download/v" + $FrpVersion + "/frp_" + $FrpVersion + "_windows_amd64.zip"
-  Say ("downloading " + $url)
-  $n = Fetch $url $zip
-  if ($n -lt 1000000) { Say ("FETCH FAILED: " + $url + " -> " + $n + " bytes"); exit 3 }
+  $zipUrl = "https://github.com/fatedier/frp/releases/download/v" + $FrpVersion + "/frp_" + $FrpVersion + "_windows_amd64.zip"
+  Say ("downloading " + $zipUrl)
+  $n = Fetch $zipUrl $zip
+  if ($n -lt 1000000) { Say ("FETCH FAILED: " + $zipUrl + " -> " + $n + " bytes"); exit 3 }
   Say ("downloaded " + $n + " bytes")
   $tmp = Join-Path $Dir "x"
   Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
@@ -102,6 +102,9 @@ serverPort = $ServerPort
 
 auth.method = "token"
 auth.token = "$Token"
+
+# Keep retrying instead of exiting when frps is briefly down (frp defaults this to true).
+loginFailExit = false
 
 log.to = "console"
 log.level = "info"
@@ -155,14 +158,14 @@ try { & node (Join-Path $Tools "tunnel-check.cjs") $Server $PublicPort http } fi
 
 # ---------- verify from the phone ----------
 if ($NoPhone) { Say "no-phone: done"; exit 0 }
+$phoneUrl = "http://" + $Server + ":" + $PublicPort
 $env:TEMP = Join-Path $Root "android\.tmp"; $env:TMP = $env:TEMP
 $adb = Join-Path $Root "android\android-sdk\platform-tools\adb.exe"
 $serial = (& $adb devices 2>$null | Select-String -Pattern "^\S+\s+device$" | Select-Object -First 1)
 if ($serial) {
   $sid = ($serial -split "\s+")[0]
   Say ("--- phone side: " + $sid + " ---")
-  $url = "http://" + $Server + ":" + $PublicPort
-  $code = (& $adb -s $sid shell ("curl -s --max-time " + $PhoneWaitSec + " -o /dev/null -w '%{http_code}' '" + $url + "/?k=" + $k + "'") 2>$null | Out-String).Trim()
+  $code = (& $adb -s $sid shell ("curl -s --max-time " + $PhoneWaitSec + " -o /dev/null -w '%{http_code}' '" + $phoneUrl + "/?k=" + $k + "'") 2>$null | Out-String).Trim()
   Say ("phone http_code=" + $code + "   (303 = tunnel reaches the bridge and the key is right; 000 = no route)")
   if ($code -eq "303") {
     # The json body travels as a pushed file. Quoting it inline through PowerShell + adb shell
@@ -171,11 +174,11 @@ if ($serial) {
     $req = Join-Path $Root "android\.tmp\frp-req.json"
     [System.IO.File]::WriteAllText($req, $body, (New-Object System.Text.ASCIIEncoding))
     & $adb -s $sid push $req /data/local/tmp/frp-req.json 2>$null | Out-Null
-    $api = (& $adb -s $sid shell ("curl -s --max-time " + $PhoneWaitSec + " -H 'Cookie: dsh-bridge=" + $k + "' -H 'Content-Type: application/json' -d @/data/local/tmp/frp-req.json -o /dev/null -w '%{http_code}' '" + $url + "/api/session/list'") 2>$null | Out-String).Trim()
+    $api = (& $adb -s $sid shell ("curl -s --max-time " + $PhoneWaitSec + " -H 'Cookie: dsh-bridge=" + $k + "' -H 'Content-Type: application/json' -d @/data/local/tmp/frp-req.json -o /dev/null -w '%{http_code}' '" + $phoneUrl + "/api/session/list'") 2>$null | Out-String).Trim()
     Say ("phone api http_code=" + $api + "   (200 = the phone is really driving DSH)")
   }
 } else {
   Say "no adb device online; skipped the phone check"
 }
-Say ("phone url: " + $url + "/?k=" + $k)
+Say ("phone url: " + $phoneUrl + "/?k=" + $k)
 Say "done."
