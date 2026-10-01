@@ -7,6 +7,11 @@ tools/.natapp-token
 tools/natapp/
 tools/natapp.log
 tools/natapp.err.log
+# frp（自建 VPS 隧道）：frpc.toml 里有 frps 的 token，等同钥匙
+tools/.frp-token
+tools/frp/
+tools/frpc.log
+tools/frpc.err.log
 
 # ---- 体积大 / 可重新生成 ----
 # android/android-sdk/ ：bootstrap-sdk.ps1 可重建，231 MB

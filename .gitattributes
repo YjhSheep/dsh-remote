@@ -1,0 +1,3 @@
+# Keep shell scripts LF even though this repo is checked out on Windows with
+# core.autocrlf: a CRLF .sh uploaded to Linux dies on the first line.
+*.sh text eol=lf
