@@ -6,6 +6,7 @@ tools/layout.json
 tools/.natapp-token
 tools/natapp/
 tools/natapp.log
+tools/natapp.err.log
 
 # ---- 体积大 / 可重新生成 ----
 # android/android-sdk/ ：bootstrap-sdk.ps1 可重建，231 MB
