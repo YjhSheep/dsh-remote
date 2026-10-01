@@ -2,6 +2,10 @@
 tools/.bridge-key
 tools/bridge.log
 tools/layout.json
+# natapp 的 authtoken（等同钥匙，泄漏=别人能穿透到你这台机器）
+tools/.natapp-token
+tools/natapp/
+tools/natapp.log
 
 # ---- 体积大 / 可重新生成 ----
 # android/android-sdk/ ：bootstrap-sdk.ps1 可重建，231 MB
