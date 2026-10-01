@@ -42,6 +42,9 @@ public final class DshClient {
     void onItem(JSONObject value);
 
     void onEnd();
+
+    /** 这路流被服务端拒绝（例如子代理会话只能用父会话地址打开）；默认什么都不做。 */
+    default void onError(String code, String message) {}
   }
 
   /** 连接状态变化。 */
@@ -85,6 +88,7 @@ public final class DshClient {
 
   private WebSocket socket;
   private boolean connecting;
+  private boolean closing;
   private int retryMs = 1000;
   private State state;
 
@@ -215,6 +219,7 @@ public final class DshClient {
       s = socket;
       socket = null;
       connecting = false;
+      closing = true; // 主动关闭时 onClosed 会回调，别当成掉线报错
     }
     if (s != null) s.close(1000, "bye");
     rpc.dispatcher().executorService().shutdown();
@@ -280,6 +285,11 @@ public final class DshClient {
       socket = null;
       connecting = false;
       outbox.clear();
+      if (closing) {
+        closing = false;
+        subs.clear();
+        return;
+      }
       reopen = new ArrayList<Sub>(subs.values());
       subs.clear();
     }
@@ -325,6 +335,18 @@ public final class DshClient {
       }
       JSONObject value = msg.optJSONObject("value");
       if (sub != null && value != null) sub.stream.onItem(value);
+    } else if ("error".equals(type)) {
+      Sub sub;
+      synchronized (lock) {
+        sub = subs.remove(streamId);
+      }
+      if (sub != null) {
+        JSONObject err = msg.optJSONObject("error");
+        String code = err == null ? "error" : err.optString("code", "error");
+        String message = err == null ? "" : err.optString("message", "");
+        sub.stream.onError(code, message);
+        sub.stream.onEnd();
+      }
     } else if ("end".equals(type) || "cancel".equals(type)) {
       Sub sub;
       synchronized (lock) {

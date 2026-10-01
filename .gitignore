@@ -21,6 +21,9 @@ android/.tmp/
 android/.android-home/
 android/app/build/
 
+# ---- 校验用的第三方 jar（client-check.ps1 缺了会自己下）----
+tools/client-check/*.jar
+
 # ---- 编辑器 / 系统 ----
 .vscode/
 .idea/

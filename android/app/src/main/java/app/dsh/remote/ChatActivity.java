@@ -145,6 +145,21 @@ public class ChatActivity extends AppCompatActivity {
 
           @Override
           public void onEnd() {}
+
+          @Override
+          public void onError(final String code, final String message) {
+            runOnUiThread(
+                new Runnable() {
+                  @Override
+                  public void run() {
+                    setRunning(false);
+                    bar.setSubtitle(R.string.st_failed);
+                    slot("e:stream", R.color.bubble_error, false)
+                        .setText("打不开这个会话：" + human(code, message));
+                    scrollToEnd();
+                  }
+                });
+          }
         });
   }
 
@@ -369,6 +384,13 @@ public class ChatActivity extends AppCompatActivity {
   private static String tail(String id) {
     int i = id.lastIndexOf('-');
     return i >= 0 ? "会话 · " + id.substring(i + 1) : "会话";
+  }
+
+  /** 把服务端的流错误翻译成人能看的一句话。 */
+  private static String human(String code, String message) {
+    if ("session/agent-busy".equals(code)) return "这是子代理会话，得从父会话里打开";
+    if (message == null || message.isEmpty()) return code;
+    return message + "（" + code + "）";
   }
 
   private int dp(int v) {
