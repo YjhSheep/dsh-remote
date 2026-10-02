@@ -10,8 +10,8 @@ android {
         applicationId = "app.dsh.remote"
         minSdk = 26
         targetSdk = 34
-        versionCode = 6
-        versionName = "0.6"
+        versionCode = 7
+        versionName = "0.7"
     }
 
     // Same keystore the hand-rolled pipeline uses (android/dsh-debug.keystore).
@@ -44,11 +44,9 @@ android {
 }
 
 dependencies {
+    // Only for ViewCompat/WindowInsetsCompat in WebActivity.applyImmersive: the platform insets
+    // API it needs is API 30+, and this app also runs on API 26. Nothing else needs a library -
+    // there is no okhttp (the WebView speaks HTTP, not the app), no AppCompat (the shell is a plain
+    // android.app.Activity) and no Material (its Toolbar/ProgressBar/AlertDialog are platform ones).
     implementation("androidx.core:core:1.13.1")
-    implementation("androidx.appcompat:appcompat:1.7.0")
-    implementation("com.google.android.material:material:1.12.0")
-    implementation("androidx.recyclerview:recyclerview:1.3.2")
-    implementation("androidx.constraintlayout:constraintlayout:2.1.4")
-    // WebSocket client for /api/remote.mux (and TLS termination when reached through a tunnel).
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }

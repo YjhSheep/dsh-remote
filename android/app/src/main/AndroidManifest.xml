@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- versionCode/versionName live in app/build.gradle.kts only. A copy here is a second place to keep
-     in sync and it silently went stale (it still said 0.4 while the build shipped 0.5); aapt2 link
-     gets its numbers from Gradle, and android/build.ps1 hardcodes its own, so nothing reads these. -->
+     in sync and it silently went stale; aapt2 link gets its numbers from Gradle, and
+     android/gradle-build.ps1 is the only build left, so nothing reads these. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
@@ -16,11 +16,11 @@
         <!-- The activities carry no label of their own: they inherit @string/app_name, so a copy
              here would only be a second place to keep in sync. -->
 
-        <!-- The launcher is the WebView shell: it shows the DSH web UI itself (with the bridge's
-             mobile.css injected), which is what the phone is actually for. The native list/chat
-             pages are still installed and still reachable - WebActivity's menu opens them, and adb
-             can still start MainActivity with its selfcheck extra (see the command in its header)
-             because MainActivity stays exported even though it advertises no intent filter. -->
+        <!-- One activity, and that is the whole app: a WebView around the DSH web UI (with the
+             bridge's mobile.css injected), reached through the loopback tunnel. The native
+             list/chat screens are gone - they were a second, worse copy of UI that DSH already
+             ships - so there is no AppCompat/Material activity left and no library beyond androidx
+             core. -->
         <activity
             android:name="app.dsh.remote.WebActivity"
             android:exported="true"
@@ -32,19 +32,5 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
-        <activity
-            android:name="app.dsh.remote.MainActivity"
-            android:exported="true"
-            android:theme="@style/NativeTheme"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
-            android:windowSoftInputMode="adjustResize" />
-
-        <activity
-            android:name="app.dsh.remote.ChatActivity"
-            android:exported="false"
-            android:theme="@style/NativeTheme"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
-            android:windowSoftInputMode="adjustResize" />
     </application>
 </manifest>

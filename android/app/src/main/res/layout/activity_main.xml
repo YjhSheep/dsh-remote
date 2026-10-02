@@ -7,7 +7,7 @@
     android:orientation="vertical">
 
     <!-- Page-coloured + hairline-separated, so it blends with the DSH page's own header. The root
-         is what MainActivity.applyImmersive() pads: on API 30+ the window draws under the status
+         is what WebActivity.applyImmersive() pads: on API 30+ the window draws under the status
          and gesture bars (that padded area is this layout's page_bg, so it stays seamless) and the
          page lifts its own bottom-anchored UI by the safe-bottom variable it publishes. -->
     <android.widget.Toolbar

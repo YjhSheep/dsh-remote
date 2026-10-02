@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- No action bar: the layout carries its own Toolbar. On API 30+ MainActivity draws under the
+    <!-- No action bar: the layout carries its own Toolbar. On API 30+ the shell draws under the
          system bars (transparent status and gesture bars, insets applied to the root as padding),
          so the page's own background reaches the screen edge and the gesture pill floats over it;
          the colours below stay as the fallback for older devices, where the bars remain opaque.
@@ -15,21 +15,6 @@
         <!-- A 27+ attribute while minSdk is 26; on API 26 the framework has no such item, ignores
              it, and the dark nav bar there keeps its own default icons. Ui/applyImmersive set the
              icon colour programmatically where it matters. -->
-        <item name="android:windowLightNavigationBar" tools:targetApi="27">true</item>
-    </style>
-
-    <!-- The native screens (sessions + chat) are AppCompat/Material activities, so they need an
-         AppCompat-family theme; WebActivity keeps AppTheme because it is a plain Activity. -->
-    <style name="NativeTheme" parent="Theme.Material3.DayNight.NoActionBar">
-        <item name="colorPrimary">@color/brand</item>
-        <item name="colorOnPrimary">@color/on_brand</item>
-        <item name="android:colorBackground">@color/page_bg</item>
-        <item name="colorSurface">@color/page_bg</item>
-        <item name="colorOnSurface">@color/ink</item>
-        <item name="android:windowBackground">@color/page_bg</item>
-        <item name="android:statusBarColor">@android:color/transparent</item>
-        <item name="android:navigationBarColor">@android:color/transparent</item>
-        <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowLightNavigationBar" tools:targetApi="27">true</item>
     </style>
 

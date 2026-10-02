@@ -9,8 +9,4 @@
     <color name="line">#FF33333A</color>
     <color name="ok">#FF4ADE80</color>
     <color name="bad">#FFF87171</color>
-    <color name="bubble_user">#FF232838</color>
-    <color name="bubble_agent">#FF1F1F23</color>
-    <color name="bubble_tool">#FF1B1B1F</color>
-    <color name="bubble_error">#FF3A2224</color>
 </resources>

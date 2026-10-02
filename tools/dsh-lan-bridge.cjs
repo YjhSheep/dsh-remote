@@ -251,7 +251,7 @@ const server = http.createServer((req, res) => {
     if (u.pathname === "/__bridge/state")
       return serveLocal(res, LAYOUT_JSON, "application/json; charset=utf-8");
     // Delivery path for the phone app: open this on the phone and Android installs it
-    // straight from the PC. 404s until android/build.ps1 has produced the APK.
+    // straight from the PC. 404s until android/gradle-build.ps1 has produced the APK.
     if (u.pathname === "/__bridge/app.apk")
       return serveLocal(res, APP_APK, "application/vnd.android.package-archive");
     res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });

@@ -1,8 +1,8 @@
 # DSH 遥控（Android）
 
 一个极薄的 WebView 壳：手机上打开电脑里的 DSH，并把访问密钥存在 App 里、地址栏省掉。
-**它也是启动入口**（v0.6 起）：打开 App 直接就是这个网页壳；App 自绘的会话列表/聊天页退到
-⋮ →「原生界面」当备用（真机上那套 UI 还有明显问题）。
+包里**只有这一个界面**（v0.7 起）：打开 App 直接显示 DSH 的完整网页界面；原先 App 自绘的
+会话列表/聊天页（原生界面）已**在 v0.7 整块删除**，不再有任何原生 UI。
 
 ## 为什么中间要有一条本机隧道
 
@@ -35,15 +35,18 @@ powershell -ExecutionPolicy Bypass -File .\bootstrap-sdk.ps1   # 约 121 MB：bu
 （本机默认禁止运行 .ps1，所以要用 `-ExecutionPolicy Bypass -File` 调；直接 `.\bootstrap-sdk.ps1`
 会报「在此系统上禁止运行脚本」。）
 
-装到 `.\android-sdk`（可用 `$env:DSH_ANDROID_SDK` 改）。**不需要 Android Studio、不需要 Gradle、
-不需要 Kotlin，也不用 sdkmanager**：本机已有的 JDK 11 负责 `javac`/`keytool`，SDK 自带的
-`aapt2`/`d8`/`zipalign`/`apksigner` 负责其余步骤。（官方 command-line-tools 能认 api 34 的版本都要
-JDK 17，所以脚本直接抓两个已验证 200 的 zip。）
+装到 `.\android-sdk`（可用 `$env:DSH_ANDROID_SDK` 改），**这里只负责下载 SDK 包**（build-tools 34.0.0 +
+platform 34）；真正构建用的是 Gradle 8.9 + `android\tools\jdk17`，由 `gradle-build.ps1` 驱动 —— 不用
+Android Studio、不用 sdkmanager。早先那套「JDK 11 + SDK 自带 aapt2/d8/zipalign/apksigner」的手写
+工具链已随 v0.7 删除原生界面一起删掉。
 
 ## 构建
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\build.ps1   # 产出 .\dist\dsh-remote.apk（自签名，密钥 .\dsh-debug.keystore）
+# Gradle 8.9 + android\tools\jdk17，唯一构建脚本；默认任务 assembleDebug
+powershell -ExecutionPolicy Bypass -File .\gradle-build.ps1
+# 产物 app\build\outputs\apk\debug\app-debug.apk → 拷成 dist\dsh-remote.apk（桥接分发的是它）
+Copy-Item .\app\build\outputs\apk\debug\app-debug.apk .\dist\dsh-remote.apk -Force
 ```
 
 换图标：把美术图放进 `icon/`（现在的 `icon/1.1.ico` 就是当前用的那张），跑
@@ -94,10 +97,10 @@ java -cp .\build\tunneltest app.dsh.remote.TunnelTest 3080 <密钥>
 app/AndroidManifest.xml          权限、Activity、软键盘 adjustResize、启动器图标
 app/res/                         strings / styles / layout / menu / mipmap（图标）
 app/java/app/dsh/remote/Tunnel.java        127.0.0.1 裸 TCP 转发
-app/java/app/dsh/remote/MainActivity.java  顶栏/状态 + WebView + 设置 + 文件选择
+app/java/app/dsh/remote/WebActivity.java   网页壳：顶栏/状态 + WebView + 设置 + 文件选择
 icon/1.1.ico                     图标原图（make-icon.py 的输入）
 make-icon.py                     原图 → mipmap 各密度 + 自适应图标前景
-bootstrap-sdk.ps1 / build.ps1    无 Gradle 的工具链
+bootstrap-sdk.ps1 / gradle-build.ps1  下载 SDK / Gradle 构建
 dist/dsh-remote.apk              产物（桥接的 /__bridge/app.apk 就是发它）
 ```
 
@@ -107,4 +110,4 @@ dist/dsh-remote.apk              产物（桥接的 /__bridge/app.apk 就是发�
 `chrome://inspect/#devices`（先用 `adb devices` 确认手机连着），可以直接对手机里的页面开 DevTools、
 量真实布局 —— 比反复截图猜要快。
 
-`adb logcat -s dsh-remote` 能看 App 自己的日志（`MainActivity` 打印加载 URL 与转发目标）。
+`adb logcat -s dsh-remote` 能看 App 自己的日志（`WebActivity` 打印加载 URL 与转发目标）。

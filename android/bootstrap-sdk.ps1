@@ -56,4 +56,4 @@ foreach ($a in $Artifacts) {
   if (!(Test-Path (Join-Path $a.Dest $a.Probe))) { throw "missing $($a.Probe) in $($a.Dest)" }
 }
 Write-Host "sdk ready: $Sdk"
-Write-Host 'next: powershell -ExecutionPolicy Bypass -File .\build.ps1'
+Write-Host 'next: powershell -ExecutionPolicy Bypass -File .\gradle-build.ps1'

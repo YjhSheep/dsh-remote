@@ -8,11 +8,6 @@
     <color name="line">#FFDCE0EA</color>
     <color name="ok">#FF16A34A</color>
     <color name="bad">#FFDC2626</color>
-    <!-- Message bubbles in the native chat screen. -->
-    <color name="bubble_user">#FFE8EDFF</color>
-    <color name="bubble_agent">#FFF4F5F7</color>
-    <color name="bubble_tool">#FFEDEFF3</color>
-    <color name="bubble_error">#FFFDE9E9</color>
     <!-- The launcher art's own background, so the adaptive icon's canvas matches the drawing. -->
     <color name="ic_bg">#FFCAE3FE</color>
 </resources>
