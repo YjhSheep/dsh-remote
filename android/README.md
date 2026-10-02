@@ -5,14 +5,23 @@
 ## 为什么中间要有一条本机隧道
 
 App 不在 WebView 里直接开 `http://192.168.31.216:3080`，而是先在手机内部起一条裸 TCP 隧道
-`127.0.0.1:17800 → 电脑:3080`，WebView 只访问 `http://127.0.0.1:17800/`。这样做的实际收益：
+`localhost:17800 → 电脑:3080`，WebView 只访问 `http://localhost:17800/`。这样做的实际收益：
 
 - DSH 自己用 `location.hostname` 判断「是不是本机页面」（回环 = 桌面端的处境）。隧道让这个判断
   天然为真，所以**设置页 / 模型页不需要 `tools/bridge/owns-host.js` 那种信任注入**也能工作。
+- **回环地址同时是浏览器眼里的「安全上下文」**：DSH 前端要用 `crypto.randomUUID`，而它只在
+  `http://127.0.0.1:*` / `http://localhost:*` 这类 potentially-trustworthy 的 origin 上存在。
+  所以 WebView 不能反过来直接开公网隧道地址 —— 那样连客户端连接对象都构造不出来。
 - 转发的是字节，不解析 HTTP：文档、`/api`、SSE（`/plugins/events`）、WebSocket 升级都走同一条路。
 - 密钥留在 App 的偏好设置里，不躺在浏览器地址栏和网页 URL 里。
 
-首次导航带 `?k=密钥`：桥接会回 303 并把 `dsh-bridge=密钥` 的 cookie 种在 `127.0.0.1` 上，
+**为什么是 `localhost` 而不是 `127.0.0.1`**（v0.5 起）：隧道是裸 TCP 转发，会把 WebView 的请求头
+原样发给上游；如果 WebView 开在 `127.0.0.1`，公网的明文链路上就会出现 `Host: 127.0.0.1:<端口>`，
+而某些中间盒见到这个字面量会直接回 RST —— 继电器一个字节都收不到，WebView 报
+`net::ERR_EMPTY_RESPONSE`（同一个隧道地址用浏览器开却是正常的，因为它发的是服务器地址）。
+`localhost` 同样是回环、同样过 DSH 的本机判断，但网线上不再出现那个字面量。
+
+首次导航带 `?k=密钥`：桥接会回 303 并把 `dsh-bridge=密钥` 的 cookie 种在 `localhost` 上，
 之后所有请求（文档、`/api`、SSE、WS）都在闸门内。
 
 ## 一次性准备

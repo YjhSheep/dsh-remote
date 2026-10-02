@@ -10,11 +10,13 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 
 /**
- * Raw TCP forwarder: 127.0.0.1:&lt;local&gt; -&gt; &lt;host&gt;:&lt;port&gt; (the DSH LAN bridge on the PC).
+ * Raw TCP forwarder: localhost:&lt;local&gt; -&gt; &lt;host&gt;:&lt;port&gt; (the DSH LAN bridge on the PC).
  *
- * <p>The WebView only ever loads http://127.0.0.1:&lt;local&gt;/, so DSH's own hostname based
- * trust check classifies the page as loopback - exactly what the desktop app sees - and the
- * settings / model pages work with no host-trust patch.
+ * <p>The WebView only ever loads http://localhost:&lt;local&gt;/ (WebActivity.LOCAL_HOST), so DSH's own
+ * hostname based trust check classifies the page as loopback - exactly what the desktop app sees -
+ * and the settings / model pages work with no host-trust patch. The name is "localhost" and not
+ * "127.0.0.1" for a wire reason: middleboxes reset a cleartext request whose Host is the literal
+ * 127.0.0.1, so over a tunnel the literal would reach the bridge and never come back.
  *
  * <p>Forwarding bytes instead of interpreting HTTP means the same socket carries the document,
  * /api calls, the SSE stream at /plugins/events and WebSocket upgrades alike.
@@ -33,7 +35,9 @@ final class Tunnel {
 
   private static ServerSocket bind(int wanted) throws IOException {
     // Bind 127.0.0.1 explicitly: getLoopbackAddress() can hand back ::1 (the v6 loopback) on some
-    // devices, and the WebView always asks for 127.0.0.1 - a v6-only listener refuses it.
+    // devices. The WebView asks for "localhost", which resolves to ::1 as well, but a refused v6
+    // attempt just falls through to 127.0.0.1 - the same thing every IPv4-only dev server relies on.
+    // Binding the name would be wrong anyway: a v6-only listener refuses the v4 attempt.
     InetAddress loopback = InetAddress.getByName("127.0.0.1");
     IOException last = null;
     for (int p = wanted; p < wanted + 8; p++) {

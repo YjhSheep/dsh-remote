@@ -202,7 +202,38 @@ function injectHtml(html) {
   return /<\/body>/i.test(html) ? html.replace(/<\/body>/i, tags + "</body>") : html + tags;
 }
 
+// One line per request. A phone that shows an error page cannot say whether its request ever
+// reached us: tools/bridge.log only records startup and probe events, and /api traffic leaves no
+// trace at all. The byte count we actually wrote back is what separates "never arrived" from
+// "answered here and lost on the way back" — which is exactly the App-over-the-tunnel question.
+const REQLOG = path.join(__dirname, "bridge.req.log");
+function logReq(text) {
+  try {
+    fs.appendFileSync(REQLOG, `${new Date().toISOString()} ${text}\n`);
+  } catch (e) {
+    // a log must never break the proxy
+  }
+}
+
 const server = http.createServer((req, res) => {
+  let out = 0;
+  const write = res.write.bind(res);
+  const end = res.end.bind(res);
+  res.write = (chunk, ...rest) => {
+    if (chunk) out += Buffer.byteLength(chunk);
+    return write(chunk, ...rest);
+  };
+  res.end = (chunk, ...rest) => {
+    if (chunk) out += Buffer.byteLength(chunk);
+    return end(chunk, ...rest);
+  };
+  const started = Date.now();
+  res.on("finish", () =>
+    logReq(
+      `${req.method} ${req.headers.host || "-"} ${req.url} from ${req.socket.remoteAddress} -> ` +
+        `${res.statusCode} ${out}B ${Date.now() - started}ms`,
+    ),
+  );
   if (!gateOk(req)) {
     res.writeHead(401, { "content-type": "text/html; charset=utf-8" });
     res.end(GATE_PAGE);
@@ -285,6 +316,10 @@ const server = http.createServer((req, res) => {
 
 // WebSocket / any Upgrade: the client stream lives here, so this must work.
 server.on("upgrade", (req, socket, head) => {
+  logReq(
+    `UPGRADE ${req.headers.host || "-"} ${req.url} from ${req.socket.remoteAddress} ` +
+      `-> ${gateOk(req) ? "proxied" : "401"}`,
+  );
   if (!gateOk(req)) {
     socket.end("HTTP/1.1 401 Unauthorized\r\n\r\n");
     return;

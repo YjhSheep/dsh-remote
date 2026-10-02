@@ -50,6 +50,16 @@ public class WebActivity extends Activity {
   private static final String TAG = "dsh-remote";
   private static final String PREFS = "dsh-remote";
   private static final int LOCAL_PORT = 17800;
+  /**
+   * The host the WebView loads: loopback, so the page is a secure context (the DSH client calls
+   * crypto.randomUUID when it builds its connection, and that API does not exist outside one) and
+   * DSH treats it as host-owned - but spelled "localhost" and not the literal "127.0.0.1", because
+   * a cleartext request that carries the literal 127.0.0.1 across a tunnel is reset on the way by
+   * middleboxes. That reset is invisible at both ends (the bridge answers, the socket just dies),
+   * and it is exactly why the same App works over the LAN and shows net::ERR_EMPTY_RESPONSE over a
+   * public address. localhost resolves to the same loopback listener.
+   */
+  private static final String LOCAL_HOST = "localhost";
   private static final int DEFAULT_PORT = 3080;
   private static final int PICK_FILES = 41;
 
@@ -242,13 +252,14 @@ public class WebActivity extends Activity {
     try {
       tunnel = new Tunnel(host, port, LOCAL_PORT);
     } catch (IOException e) {
-      showProblem("127.0.0.1:" + LOCAL_PORT, "本机端口起不来：" + e);
+      showProblem(LOCAL_HOST + ":" + LOCAL_PORT, "本机端口起不来：" + e);
       return;
     }
     tunnel.start();
-    // ?k= makes the bridge answer 303 + Set-Cookie for host 127.0.0.1, so every later request
+    // ?k= makes the bridge answer 303 + Set-Cookie for this host, so every later request
     // (document, /api, SSE, WS) is already inside the gate.
-    lastUrl = "http://127.0.0.1:" + tunnel.port() + "/" + (key.isEmpty() ? "" : "?k=" + Uri.encode(key));
+    lastUrl =
+        "http://" + LOCAL_HOST + ":" + tunnel.port() + "/" + (key.isEmpty() ? "" : "?k=" + Uri.encode(key));
     Log.i(TAG, "load " + lastUrl + " -> " + target);
     setStatus(R.string.st_connecting);
     hideOverlay();
@@ -295,6 +306,12 @@ public class WebActivity extends Activity {
         // nothing to clean up
       }
     }
+  }
+
+  /** True for the hosts the local tunnel answers on: localhost, IPv6 loopback, and all of 127/8. */
+  private static boolean isLoopbackHost(String host) {
+    return host != null
+        && (host.equals("localhost") || host.equals("::1") || host.matches("127(\\.\\d{1,3}){3}"));
   }
 
   /** Says which address failed and why - the socket error names the phone's own address too. */
@@ -446,7 +463,7 @@ public class WebActivity extends Activity {
     @Override
     public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
       Uri u = req.getUrl();
-      if ("127.0.0.1".equals(u.getHost())) return false; // keep the tunnel in charge
+      if (isLoopbackHost(u.getHost())) return false; // keep the tunnel in charge
       try {
         startActivity(new Intent(Intent.ACTION_VIEW, u));
       } catch (Exception e) {
