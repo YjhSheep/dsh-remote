@@ -2,6 +2,7 @@
     <string name="app_name">DeepSeek Harness</string>
     <string name="action_setup">设置</string>
     <string name="action_reload">重新加载</string>
+    <string name="action_native">原生界面</string>
     <string name="setup_hint_link">电脑地址，或桥接打印的完整链接\n例：192.168.31.216:3080</string>
     <string name="setup_hint_key">访问密钥（链接里已含 k= 时留空）</string>
     <string name="setup_run">请先在电脑上运行 tools\\dsh-lan-bridge.cmd</string>

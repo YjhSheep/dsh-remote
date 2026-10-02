@@ -37,8 +37,8 @@ import java.util.concurrent.TimeUnit;
 /**
  * 原生首页：列出电脑上的会话，点进去聊天。
  *
- * <p>说 DSH 自己的 HTTP 协议（见 {@link DshClient}），不依赖 WebView；旧的网页壳保留在
- * {@link WebActivity} 里当退路。
+ * <p>说 DSH 自己的 HTTP 协议（见 {@link DshClient}），不依赖 WebView。启动入口是网页壳
+ * {@link WebActivity}（它的 ⋮ 里有「原生界面」），这几页现在算备用界面。
  */
 public class MainActivity extends AppCompatActivity {
 

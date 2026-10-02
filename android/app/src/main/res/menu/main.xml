@@ -8,4 +8,7 @@
     <item
         android:id="@+id/action_reload"
         android:title="@string/action_reload" />
+    <item
+        android:id="@+id/action_native"
+        android:title="@string/action_native" />
 </menu>

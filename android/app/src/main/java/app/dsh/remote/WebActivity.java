@@ -104,6 +104,11 @@ public class WebActivity extends Activity {
               open();
               return true;
             }
+            if (id == R.id.action_native) {
+              // The native list/chat pages, still reachable now that this shell is the launcher.
+              startActivity(new Intent(WebActivity.this, MainActivity.class));
+              return true;
+            }
             return false;
           }
         });
