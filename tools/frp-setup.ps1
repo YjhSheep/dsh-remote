@@ -1,6 +1,6 @@
 # frp-setup.ps1 -- install / configure / start / verify the frp client that publishes the
-# DSH bridge through your own VPS. This is the "self-hosted tunnel" route; tools\natapp-setup.ps1
-# is the vendor-tunnel route. Keep both, run one client at a time.
+# DSH bridge through your own VPS. This is the only tunnel route now (2026-10-02): the
+# vendor tunnels and Tailscale were uninstalled along with their files.
 #
 # ASCII ONLY on purpose: Windows PowerShell 5.1 reads no-BOM UTF-8 as GBK and mangles quotes.
 #

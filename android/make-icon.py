@@ -4,7 +4,7 @@
 #
 #     python make-icon.py [art]        (default: android/icon/1.1.ico)
 #
-# The adaptive icon itself is app/res/mipmap-anydpi-v26/ic_launcher{,_round}.xml, which paints
+# The adaptive icon itself is app/src/main/res/mipmap-anydpi-v26/ic_launcher{,_round}.xml, which paints
 # @color/ic_bg behind the foreground. That colour is sampled from the art's own background, so the
 # art's rounded corners vanish against the canvas and only the drawing reads as the icon.
 import os
@@ -14,7 +14,7 @@ from PIL import Image
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ART = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "icon", "1.1.ico")
-RES = os.path.join(HERE, "app", "res")
+RES = os.path.join(HERE, "app", "src", "main", "res")
 
 DENSITIES = {"mdpi": 1.0, "hdpi": 1.5, "xhdpi": 2.0, "xxhdpi": 3.0, "xxxhdpi": 4.0}
 LEGACY_DP = 48        # classic launcher icon

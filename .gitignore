@@ -3,11 +3,6 @@ tools/.bridge-key
 tools/bridge.log
 tools/bridge.req.log
 tools/layout.json
-# natapp 的 authtoken（等同钥匙，泄漏=别人能穿透到你这台机器）
-tools/.natapp-token
-tools/natapp/
-tools/natapp.log
-tools/natapp.err.log
 # frp（自建 VPS 隧道）：frpc.toml 里有 frps 的 token，等同钥匙
 tools/.frp-token
 tools/frp/
@@ -31,9 +26,6 @@ android/.gradle-home/
 android/.tmp/
 android/.android-home/
 android/app/build/
-
-# ---- 校验用的第三方 jar（client-check.ps1 缺了会自己下）----
-tools/client-check/*.jar
 
 # ---- 编辑器 / 系统 ----
 .vscode/

@@ -50,8 +50,8 @@ Copy-Item .\app\build\outputs\apk\debug\app-debug.apk .\dist\dsh-remote.apk -For
 ```
 
 换图标：把美术图放进 `icon/`（现在的 `icon/1.1.ico` 就是当前用的那张），跑
-`python make-icon.py` 重生成 `app/res/mipmap-*/ic_launcher.png` 与自适应图标的前景 `ic_fg.png`，
-再重新构建。自适应图标的底色是 `app/res/values/colors.xml` 里的 `ic_bg`（取自原图的背景色，
+`python make-icon.py` 重生成 `app/src/main/res/mipmap-*/ic_launcher.png` 与自适应图标的前景 `ic_fg.png`，
+再重新构建。自适应图标的底色是 `app/src/main/res/values/colors.xml` 里的 `ic_bg`（取自原图的背景色，
 所以原图的圆角不会在启动器里露出方边）。
 
 ## 自测隧道（可选）
@@ -59,7 +59,7 @@ Copy-Item .\app\build\outputs\apk\debug\app-debug.apk .\dist\dsh-remote.apk -For
 `Tunnel` 只用了 JDK 自带的类，所以不用手机、不用模拟器，在电脑上就能连**真桥接**验证：
 
 ```powershell
-javac -encoding UTF-8 -d .\build\tunneltest app\java\app\dsh\remote\Tunnel.java test\TunnelTest.java
+javac -encoding UTF-8 -d .\build\tunneltest app\src\main\java\app\dsh\remote\Tunnel.java test\TunnelTest.java
 java -cp .\build\tunneltest app.dsh.remote.TunnelTest 3080 <密钥>
 ```
 
@@ -72,7 +72,9 @@ java -cp .\build\tunneltest app.dsh.remote.TunnelTest 3080 <密钥>
 
 1. 手机上用**浏览器**打开 `http://<电脑IP>:3080/__bridge/app.apk?k=<密钥>` → 下载 → 安装
    （需要允许「安装未知应用」）。用浏览器而不是 App，是因为浏览器那一步会带上 `?k=` 换来的 cookie。
-2. 或者用数据线：`adb install -r .\dist\dsh-remote.apk`
+2. 或者走 adb（这台手机走 WiFi 调试，USB 口是空的）：`adb connect 192.168.31.168:5555` 之后
+   `adb -s 192.168.31.168:5555 install -r .\dist\dsh-remote.apk`；**先把 `$env:TEMP` 指到工作区内**，
+   否则 adb 报 `cannot open C:\Temp\adb.log: Permission denied`。
 
 ## 使用
 

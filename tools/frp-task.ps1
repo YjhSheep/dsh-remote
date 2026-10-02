@@ -5,10 +5,9 @@
 #   powershell -NoProfile -ExecutionPolicy Bypass -File tools\frp-task.ps1 -Off
 #       disable the task and stop the tunnel
 #
-# Same self-heal shape as the natapp and bridge tasks: the action runs tools\frp-start.vbs,
-# which exits immediately if frpc.exe is already running, so the 5-minute repeat can never
-# produce a second client. This is the VPS/frp route; the natapp task can stay registered
-# next to it (only one of them should be running at a time).
+# Same self-heal shape as the bridge task: the action runs tools\frp-start.vbs, which exits
+# immediately if frpc.exe is already running, so the 5-minute repeat can never produce a
+# second client. This is the only tunnel task now; the vendor-tunnel tasks are gone.
 [CmdletBinding()]
 param([switch]$Off, [string]$TaskName = 'DSH frp Client')
 

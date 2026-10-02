@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 // tools/tunnel-check.cjs
 // 从「外面」的地址测一遍：能不能连上、密钥对不对、DSH 认不认这个客户端。
-// 内网地址、花生壳/natapp 给的公网域名、Tailscale 的 100.x 地址都可以当参数传。
+// 内网地址、自建 frp 的公网地址（当前唯一隧道）都可以当参数传。
 //
 // 用法: node tools\tunnel-check.cjs [host] [port] [scheme]
 //   node tools\tunnel-check.cjs                          # 默认走内网 192.168.31.216:3080
-//   node tools\tunnel-check.cjs xxx.vicp.net 80          # 花生壳的地址
-//   node tools\tunnel-check.cjs my-host.ts.net 3080 https # Tailscale
+//   node tools\tunnel-check.cjs 47.76.59.5 8443          # 自建 frp 的公网入口
 //
 // 只读：只调 session/list，不会动任何会话。
 "use strict";
