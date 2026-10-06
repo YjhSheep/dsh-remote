@@ -23,5 +23,5 @@
 
 ```powershell
 node tools\verify-bridge.cjs            # 注入层剥离后应与回环页面逐字节一致
-node tools\phone-shot.cjs tmp\shot.png --url "http://192.168.31.216:3080/?k=<key>" --dump whale     # whale | ellipse | overflow | settings
+node tools\phone-shot.cjs tmp\shot.png --url "http://10.190.24.150:3080/?k=<key>" --dump whale     # whale | ellipse | overflow | settings
 ```

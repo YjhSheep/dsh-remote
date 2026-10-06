@@ -2,13 +2,18 @@ package app.dsh.remote;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
+import android.net.ConnectivityManager;
+import android.net.Network;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.MenuItem;
@@ -32,9 +37,18 @@ import androidx.core.view.OnApplyWindowInsetsListener;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.net.URL;
+import java.util.ArrayList;
+import java.util.List;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 /**
  * A thin WebView around the desktop DSH, reached over a loopback tunnel (see {@link Tunnel}).
@@ -62,6 +76,15 @@ public class WebActivity extends Activity {
   private static final String LOCAL_HOST = "localhost";
   private static final int DEFAULT_PORT = 3080;
   private static final int PICK_FILES = 41;
+  /**
+   * How long one direct-lan probe may take. Deliberately short: a dead candidate must not delay the
+   * next one, and the fallback (the configured address) already costs a round trip of its own.
+   */
+  private static final int PROBE_TIMEOUT_MS = 700;
+  /** How long the configured address is given to answer {@code /__bridge/lan.json}. */
+  private static final int BEACON_TIMEOUT_MS = 2000;
+  /** Settling time after a network change: Android reports one flap as several events in a row. */
+  private static final long RENEW_DELAY_MS = 1500;
 
   private Toolbar bar;
   private ProgressBar progress;
@@ -78,6 +101,21 @@ public class WebActivity extends Activity {
   private int gestureInsetPx;
   private int safeInsetPx;
   private int pushedInsetPx = -1;
+  /** host:port the page is really talking to, so a network flap can be compared against it. */
+  private String currentUpstream = "";
+  /** True while chooseUpstream is running: a network event must not start a second selection. */
+  private boolean selecting;
+  private Handler handler;
+
+  private ConnectivityManager.NetworkCallback networkCallback;
+  /** Re-picks the upstream once a network change has settled; see {@link #renewUpstream}. */
+  private final Runnable renewTask =
+      new Runnable() {
+        @Override
+        public void run() {
+          if (!selecting) renewUpstream();
+        }
+      };
 
   @Override
   protected void onCreate(Bundle state) {
@@ -136,6 +174,9 @@ public class WebActivity extends Activity {
     web.setWebViewClient(new Client());
     web.setWebChromeClient(new Chrome());
 
+    handler = new Handler(Looper.getMainLooper());
+    startWatchingNetwork();
+
     if (prefs().getString("host", "").isEmpty()) {
       bar.setSubtitle(R.string.st_idle);
       showOverlay(R.string.setup_title, getString(R.string.setup_run));
@@ -147,8 +188,29 @@ public class WebActivity extends Activity {
 
   @Override
   protected void onDestroy() {
+    if (handler != null) handler.removeCallbacks(renewTask);
+    if (networkCallback != null) {
+      try {
+        connectivity().unregisterNetworkCallback(networkCallback);
+      } catch (Exception e) {
+        Log.w(TAG, "cannot stop watching the network: " + e);
+      }
+      networkCallback = null;
+    }
     stopTunnel();
     super.onDestroy();
+  }
+
+  /**
+   * A phone that was asleep can wake up on another network - the screen-off window is exactly when
+   * the system may hold the callback above back, or the throttled page simply idled - so re-pick on
+   * every return to the foreground too. {@link #renewUpstream} reloads only when the address
+   * actually changed.
+   */
+  @Override
+  protected void onResume() {
+    super.onResume();
+    if (!prefs().getString("host", "").isEmpty()) scheduleRenew();
   }
 
   private SharedPreferences prefs() {
@@ -241,14 +303,55 @@ public class WebActivity extends Activity {
     web.setVisibility(View.VISIBLE);
   }
 
-  /** Bind the loopback port, check the PC is actually reachable, then point the WebView at it. */
+  /**
+   * Choose the upstream, bind the loopback port, confirm it answers, then point the WebView at it.
+   *
+   * <p>Selection runs off the UI thread: it may need a beacon fetch plus one probe per candidate.
+   */
   private void open() {
     stopTunnel();
     SharedPreferences p = prefs();
     final String host = p.getString("host", "");
     final int port = p.getInt("port", DEFAULT_PORT);
-    String key = p.getString("key", "");
+    final String key = p.getString("key", "");
+    if (host.isEmpty()) return;
+    selecting = true;
+    setStatus(R.string.st_connecting);
+    hideOverlay();
+    progress.setProgress(0);
+    progress.setVisibility(View.VISIBLE);
+    Thread pick =
+        new Thread(
+            new Runnable() {
+              @Override
+              public void run() {
+                String[] chosen;
+                try {
+                  chosen = chooseUpstream(host, port, key);
+                } catch (Throwable t) {
+                  Log.w(TAG, "cannot pick an upstream: " + t);
+                  chosen = new String[] {host, String.valueOf(port)};
+                }
+                final String[] winner = chosen;
+                runOnUiThread(
+                    new Runnable() {
+                      @Override
+                      public void run() {
+                        connect(winner[0], Integer.parseInt(winner[1]), key);
+                      }
+                    });
+              }
+            },
+            "dsh-select");
+    pick.setDaemon(true);
+    pick.start();
+  }
+
+  /** Bind the loopback port and load, against an upstream already chosen by {@link #chooseUpstream}. */
+  private void connect(final String host, final int port, String key) {
+    selecting = false;
     target = host + ":" + port;
+    currentUpstream = target;
     try {
       tunnel = new Tunnel(host, port, LOCAL_PORT);
     } catch (IOException e) {
@@ -291,11 +394,170 @@ public class WebActivity extends Activity {
     probe.start();
   }
 
+  /**
+   * Which address the loopback tunnel should forward to.
+   *
+   * <p>The configured address is used as a beacon. A phone moves between networks - home, office,
+   * mobile data - and each move changes the PC's LAN address, while the configured address is meant
+   * to be the one that survives every network (a frp tunnel, or a fixed LAN address). So we ask the
+   * beacon itself for the PC's current LAN addresses, also keep the last winner in prefs (that
+   * covers the beacon being briefly unreachable right after boot), and take the first candidate a
+   * plain TCP connect reaches. The beacon is what DSH calls last, so a same-LAN phone stops paying
+   * for a public round trip on every request.
+   *
+   * @return {host, port} of the winner, falling back to the configured address when nothing answers.
+   */
+  private String[] chooseUpstream(String beaconHost, int beaconPort, String key) {
+    List<String[]> candidates = new ArrayList<String[]>();
+    String cached = prefs().getString("lanHost", "");
+    if (!cached.isEmpty()) addCandidate(candidates, cached, prefs().getInt("lanPort", 0));
+    for (String[] a : fetchLanCandidates(beaconHost, beaconPort, key)) {
+      addCandidate(candidates, a[0], Integer.parseInt(a[1]));
+    }
+    for (String[] c : candidates) {
+      int port = Integer.parseInt(c[1]);
+      if (probeUpstream(c[0], port, PROBE_TIMEOUT_MS) == null) {
+        Log.i(TAG, "upstream " + c[0] + ":" + port + " answered directly (" + candidates.size() + " candidate(s))");
+        prefs().edit().putString("lanHost", c[0]).putInt("lanPort", port).apply();
+        return c;
+      }
+      Log.i(TAG, "upstream " + c[0] + ":" + port + " did not answer");
+    }
+    if (!candidates.isEmpty()) {
+      Log.i(TAG, "no LAN address answered, using the configured " + beaconHost + ":" + beaconPort);
+    }
+    return new String[] {beaconHost, String.valueOf(beaconPort)};
+  }
+
+  /** Keeps the candidate list free of duplicates without reordering it (first wins the probe). */
+  private static void addCandidate(List<String[]> list, String host, int port) {
+    if (host == null || host.isEmpty() || port <= 0) return;
+    for (String[] c : list) {
+      if (c[0].equals(host) && Integer.parseInt(c[1]) == port) return;
+    }
+    list.add(new String[] {host, String.valueOf(port)});
+  }
+
+  /**
+   * The PC's live LAN address list, read through the beacon ({@code /__bridge/lan.json}).
+   *
+   * <p>Empty whenever the beacon does not answer - which is normal on a phone that just left one
+   * network for another - because the cached address is then the only lead left.
+   */
+  private List<String[]> fetchLanCandidates(String host, int port, String key) {
+    List<String[]> out = new ArrayList<String[]>();
+    HttpURLConnection c = null;
+    try {
+      c = (HttpURLConnection) new URL("http://" + host + ":" + port + "/__bridge/lan.json").openConnection();
+      c.setConnectTimeout(BEACON_TIMEOUT_MS);
+      c.setReadTimeout(BEACON_TIMEOUT_MS);
+      c.setRequestProperty("Cookie", "dsh-bridge=" + key);
+      int code = c.getResponseCode();
+      if (code != 200) {
+        Log.i(TAG, "lan.json -> " + code + " via the configured " + host + ":" + port);
+        return out;
+      }
+      StringBuilder body = new StringBuilder();
+      BufferedReader reader = new BufferedReader(new InputStreamReader(c.getInputStream(), "UTF-8"));
+      String line;
+      while ((line = reader.readLine()) != null) body.append(line);
+      reader.close();
+      JSONObject json = new JSONObject(body.toString());
+      JSONArray addresses = json.optJSONArray("addresses");
+      int lanPort = json.optInt("port", DEFAULT_PORT);
+      for (int i = 0; addresses != null && i < addresses.length(); i++) {
+        String a = addresses.optString(i, "");
+        if (!a.isEmpty()) out.add(new String[] {a, String.valueOf(lanPort)});
+      }
+      Log.i(TAG, "lan.json -> " + out.size() + " candidate(s) via the configured " + host + ":" + port);
+    } catch (Exception e) {
+      Log.i(TAG, "lan.json failed via the configured " + host + ":" + port + ": " + e);
+    } finally {
+      if (c != null) c.disconnect();
+    }
+    return out;
+  }
+
+  /** A network change: re-pick once it has settled, and reload only if that changes the address. */
+  private void renewUpstream() {
+    SharedPreferences p = prefs();
+    final String host = p.getString("host", "");
+    final int port = p.getInt("port", DEFAULT_PORT);
+    final String key = p.getString("key", "");
+    if (host.isEmpty()) return;
+    Thread renew =
+        new Thread(
+            new Runnable() {
+              @Override
+              public void run() {
+                final String[] chosen = chooseUpstream(host, port, key);
+                runOnUiThread(
+                    new Runnable() {
+                      @Override
+                      public void run() {
+                        String id = chosen[0] + ":" + chosen[1];
+                        // `failed` means the page is not up at all, so the same address is still
+                        // worth a retry: the network may simply have been away.
+                        if (failed || !id.equals(currentUpstream)) {
+                          Log.i(TAG, "network changed: " + currentUpstream + " -> " + id);
+                          open();
+                        }
+                      }
+                    });
+              }
+            },
+            "dsh-renew");
+    renew.setDaemon(true);
+    renew.start();
+  }
+
+  private ConnectivityManager connectivity() {
+    return (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+  }
+
+  /**
+   * Watch the default network so a WiFi/移动数据 switch is noticed without the user touching the
+   * app. The callback fires for every event, including the registration itself, hence the debounce.
+   */
+  private void startWatchingNetwork() {
+    try {
+      networkCallback =
+          new ConnectivityManager.NetworkCallback() {
+            @Override
+            public void onAvailable(Network network) {
+              scheduleRenew();
+            }
+
+            @Override
+            public void onLost(Network network) {
+              scheduleRenew();
+            }
+          };
+      connectivity().registerDefaultNetworkCallback(networkCallback);
+    } catch (Exception e) {
+      // Without ACCESS_NETWORK_STATE (or on a device that refuses the callback) the app still
+      // works: it just re-picks on every launch, reload and retry instead of by itself.
+      Log.w(TAG, "cannot watch the network: " + e);
+      networkCallback = null;
+    }
+  }
+
+  private void scheduleRenew() {
+    if (handler == null) return;
+    handler.removeCallbacks(renewTask);
+    handler.postDelayed(renewTask, RENEW_DELAY_MS);
+  }
+
   /** @return null when the bridge accepts a connection, otherwise what went wrong. */
   private static String probeUpstream(String host, int port) {
+    return probeUpstream(host, port, 4000);
+  }
+
+  /** The same check with the caller's own patience - a candidate probe wants a much shorter one. */
+  private static String probeUpstream(String host, int port, int timeoutMs) {
     Socket s = new Socket();
     try {
-      s.connect(new InetSocketAddress(host, port), 4000);
+      s.connect(new InetSocketAddress(host, port), timeoutMs);
       return null;
     } catch (IOException e) {
       return e.toString();
@@ -352,8 +614,15 @@ public class WebActivity extends Activity {
     key.setText(p.getString("key", ""));
     String host = p.getString("host", "");
     if (!host.isEmpty()) {
+      int port = p.getInt("port", DEFAULT_PORT);
+      // The LAN address reached directly last time is what the next launch probes first, so it is
+      // worth showing next to the configured one.
+      String lan = p.getString("lanHost", "");
       note.setText(
-          getString(R.string.setup_note_map, LOCAL_PORT, host, p.getInt("port", DEFAULT_PORT)));
+          lan.isEmpty()
+              ? getString(R.string.setup_note_map, LOCAL_PORT, host, port)
+              : getString(
+                  R.string.setup_note_lan, LOCAL_PORT, host, port, lan, p.getInt("lanPort", port)));
     }
     form.findViewById(R.id.setup_test)
         .setOnClickListener(

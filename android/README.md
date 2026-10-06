@@ -4,9 +4,11 @@
 包里**只有这一个界面**（v0.7 起）：打开 App 直接显示 DSH 的完整网页界面；原先 App 自绘的
 会话列表/聊天页（原生界面）已**在 v0.7 整块删除**，不再有任何原生 UI。
 
+当前版本 **versionCode 9 / versionName "0.9"**（`app/build.gradle.kts`）。
+
 ## 为什么中间要有一条本机隧道
 
-App 不在 WebView 里直接开 `http://192.168.31.216:3080`，而是先在手机内部起一条裸 TCP 隧道
+App 不在 WebView 里直接开 `http://<电脑局域网地址>:3080`，而是先在手机内部起一条裸 TCP 隧道
 `localhost:17800 → 电脑:3080`，WebView 只访问 `http://localhost:17800/`。这样做的实际收益：
 
 - DSH 自己用 `location.hostname` 判断「是不是本机页面」（回环 = 桌面端的处境）。隧道让这个判断
@@ -25,6 +27,24 @@ App 不在 WebView 里直接开 `http://192.168.31.216:3080`，而是先在手�
 
 首次导航带 `?k=密钥`：桥接会回 303 并把 `dsh-bridge=密钥` 的 cookie 种在 `localhost` 上，
 之后所有请求（文档、`/api`、SSE、WS）都在闸门内。
+
+## 上游地址怎么选（v0.8 引入，v0.9 延伸）
+
+那条本机隧道指向哪个 `host:port` **不是写死的**。设置里的「电脑地址」是**信标 / fallback**（填在
+任何网络下都能连上的那条，通常就是隧道地址）；每次启动 / 重新加载 / 重试，`WebActivity` 先用它
+请求 `GET /__bridge/lan.json`（**2 s** 超时，带 `dsh-bridge=密钥` cookie），拿到电脑当前的局域网
+IPv4 列表（`primary` 排最前），拼上 prefs 里上次选中的 `lanHost`/`lanPort`，再以 **700 ms** 逐个
+TCP 试探、取第一个应答的当作上游；全不通才回退信标。选中的地址存进 prefs，并显示为设置框第二行
+`自动优选局域网：<ip>:<port>`。
+
+`ConnectivityManager.registerDefaultNetworkCallback`（**1.5 s** 防抖）在 WiFi / 移动数据切换后重选，
+只有选中的地址真的变了（或页面还没起来）才重载页面，所以**切网不用改设置**。这条监听需要
+`ACCESS_NETWORK_STATE`（`AndroidManifest.xml`，用途仅此）；不授予也能用，只是切网后不会自动跟上。
+**v0.9 起 `WebActivity` 还新增了 `onResume()`**：回到前台也调一次 `scheduleRenew()` 重选上游
+（息屏期间系统可能延后 `registerDefaultNetworkCallback`、页面也被限流），同样只在选中的地址真的变了时才重载。
+
+**局限**：信标自己不可达（填的是过期局域网地址、或隧道断着）而电脑地址又变了时，新地址无从发现，
+只能在设置里手填一条通得出去的地址（推荐固定填隧道地址）。
 
 ## 一次性准备
 
@@ -72,22 +92,24 @@ java -cp .\build\tunneltest app.dsh.remote.TunnelTest 3080 <密钥>
 
 1. 手机上用**浏览器**打开 `http://<电脑IP>:3080/__bridge/app.apk?k=<密钥>` → 下载 → 安装
    （需要允许「安装未知应用」）。用浏览器而不是 App，是因为浏览器那一步会带上 `?k=` 换来的 cookie。
-2. 或者走 adb（这台手机走 WiFi 调试，USB 口是空的）：`adb connect 192.168.31.168:5555` 之后
-   `adb -s 192.168.31.168:5555 install -r .\dist\dsh-remote.apk`；**先把 `$env:TEMP` 指到工作区内**，
+2. 或者走 adb（这台手机 **USB 直连、序列号 `eb6e3c67`**）：
+   `adb -s eb6e3c67 install -r .\dist\dsh-remote.apk`；**先把 `$env:TEMP` 指到工作区内**，
    否则 adb 报 `cannot open C:\Temp\adb.log: Permission denied`。
 
 ## 使用
 
 打开 App → 首次会让你填地址：
 
-- 地址：`192.168.31.216:3080`（桥接启动时打印的那个 `http://192.168.x.x:3080/?k=...` 整条粘进来也行，
-  密钥会自动从 `k=` 里取出来）
+- 地址：填**在任何网络下都能连上的那条**——隧道地址 `47.76.59.5:8443`（桥接启动时打印的
+  `http://192.168.x.x:3080/?k=...` 整条粘进来也行，密钥会自动从 `k=` 里取出来）；**不用填局域网地址**，
+  App 会自己优选局域网（见上一节），这条只是信标
 - 密钥：链接里已含 `k=` 时可留空
 
 右上角菜单：**设置**（改地址/密钥，随时换电脑）、**重新加载**。
 
-界面：顶部蓝色标题栏右边那行小字就是连接状态（`未连接` / `连接中…` / `已连接 · 192.168.31.216:3080` /
-`连不上`），标题栏下面那条细线是加载进度。连不上时页面会换成一块说明板（目标地址 + 失败原因 +
+界面：顶部蓝色标题栏右边那行小字就是连接状态（`未连接` / `连接中…` / `已连接 · <当前上游地址>` /
+`连不上`），标题栏下面那条细线是加载进度。设置框里还有一行 `自动优选局域网：<ip>:<port>`，是当前选中的
+局域网上游。连不上时页面会换成一块说明板（目标地址 + 失败原因 +
 系统 WebView 版本），带 **重试** 与 **设置** 两个按钮 —— 把里面的灰字截图发出来就能定位问题。
 
 设置窗口里有 **测试连接**：不退出就能知道这个地址通不通，结果就地显示在下面（绿色=能连上，红色=连不上）。
@@ -96,7 +118,7 @@ java -cp .\build\tunneltest app.dsh.remote.TunnelTest 3080 <密钥>
 ## 目录
 
 ```
-app/AndroidManifest.xml          权限、Activity、软键盘 adjustResize、启动器图标
+app/AndroidManifest.xml          权限（INTERNET + ACCESS_NETWORK_STATE）、Activity、软键盘 adjustResize、启动器图标
 app/res/                         strings / styles / layout / menu / mipmap（图标）
 app/java/app/dsh/remote/Tunnel.java        127.0.0.1 裸 TCP 转发
 app/java/app/dsh/remote/WebActivity.java   网页壳：顶栏/状态 + WebView + 设置 + 文件选择

@@ -2,7 +2,7 @@
     <string name="app_name">DeepSeek Harness</string>
     <string name="action_setup">设置</string>
     <string name="action_reload">重新加载</string>
-    <string name="setup_hint_link">电脑地址，或桥接打印的完整链接\n例：192.168.31.216:3080</string>
+    <string name="setup_hint_link">电脑地址：隧道地址（任何网络都能用）\n例：47.76.59.5:8443\n同一局域网时自动改用局域网直连</string>
     <string name="setup_hint_key">访问密钥（链接里已含 k= 时留空）</string>
     <string name="setup_run">请先在电脑上运行 tools\\dsh-lan-bridge.cmd</string>
     <string name="connect">连接</string>
@@ -25,5 +25,6 @@
     <string name="st_idle">未连接</string>
     <string name="setup_title">连接到电脑</string>
     <string name="setup_note_map">本机 localhost:%1$d → %2$s:%3$d</string>
+    <string name="setup_note_lan">本机 localhost:%1$d → %2$s:%3$d\n自动优选局域网：%4$s:%5$d</string>
     <string name="err_no_addr">请填电脑地址</string>
 </resources>

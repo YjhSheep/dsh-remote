@@ -21,6 +21,7 @@
 const http = require("http");
 const fs = require("fs");
 const os = require("os");
+const dgram = require("dgram");
 const path = require("path");
 const crypto = require("crypto");
 
@@ -250,6 +251,9 @@ const server = http.createServer((req, res) => {
     if (u.pathname === "/__bridge/probe" && req.method === "POST") return handleProbe(req, res);
     if (u.pathname === "/__bridge/state")
       return serveLocal(res, LAYOUT_JSON, "application/json; charset=utf-8");
+    // Live LAN address list for the App: it asks through the tunnel (a fixed address that works
+    // from any network), then tries each candidate directly and keeps the first that answers.
+    if (u.pathname === "/__bridge/lan.json") return serveLanJson(res);
     // Delivery path for the phone app: open this on the phone and Android installs it
     // straight from the PC. 404s until android/gradle-build.ps1 has produced the APK.
     if (u.pathname === "/__bridge/app.apk")
@@ -359,6 +363,56 @@ function lanAddresses() {
     .map((i) => i.address);
 }
 
+// The address the OS itself would leave by: the one a phone on the same network can dial.
+// udp4 connect() picks the route without sending a packet, so it works with no internet.
+function primaryLanAddress(callback) {
+  const socket = dgram.createSocket("udp4");
+  let done = false;
+  const finish = (value) => {
+    if (done) return;
+    done = true;
+    clearTimeout(timer);
+    try {
+      socket.close();
+    } catch (e) {
+      // already closed
+    }
+    callback(value);
+  };
+  const timer = setTimeout(() => finish(null), 500);
+  socket.once("error", () => finish(null));
+  socket.connect(53, "1.1.1.1", () => finish(socket.address().address));
+}
+
+// The start-up print is a snapshot, and the scheduled task starts this process before the
+// adapters are up — so "(no non-internal IPv4 found)" can sit in the log while the machine is
+// perfectly reachable. Re-print whenever the set actually changes; the route below calls this
+// too, so a phone asking for the live list also refreshes the human-readable log.
+let loggedLan = null;
+function logLanUrls() {
+  const lan = lanAddresses();
+  const stamp = lan.join(",");
+  if (stamp === loggedLan) return;
+  loggedLan = stamp;
+  for (const a of lan) console.log(`  phone URL: http://${a}:${PORT}/?k=${KEY}`);
+  if (!lan.length) console.log("  (no non-internal IPv4 found)");
+}
+
+/** Live candidate list for the App: which addresses it should try to reach directly. */
+function serveLanJson(res) {
+  primaryLanAddress((primary) => {
+    const all = lanAddresses();
+    const addresses =
+      primary && all.includes(primary) ? [primary, ...all.filter((a) => a !== primary)] : all;
+    logLanUrls();
+    res.writeHead(200, {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+    });
+    res.end(`${JSON.stringify({ port: PORT, primary: primary ?? null, addresses }, null, 2)}\n`);
+  });
+}
+
 // The scheduled task re-runs this every few minutes to keep the bridge up, so "port
 // already taken" is the normal, healthy case rather than a failure: report it only
 // when a human is watching a console, and exit 0 both ways.
@@ -372,11 +426,9 @@ server.on("error", (e) => {
 });
 
 server.listen(PORT, "0.0.0.0", () => {
-  const lan = lanAddresses();
   console.log(`${new Date().toISOString()} dsh-lan-bridge: listening on 0.0.0.0:${PORT} -> http://${AUTHORITY}`);
-  for (const a of lan) console.log(`  phone URL: http://${a}:${PORT}/?k=${KEY}`);
-  if (!lan.length) console.log("  (no non-internal IPv4 found)");
-  if (process.argv.includes("--selftest")) runSelfTest(lan[0] ?? "127.0.0.1");
+  logLanUrls();
+  if (process.argv.includes("--selftest")) runSelfTest(lanAddresses()[0] ?? "127.0.0.1");
 });
 
 function request(host, path, headers = {}) {

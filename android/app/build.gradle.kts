@@ -10,8 +10,8 @@ android {
         applicationId = "app.dsh.remote"
         minSdk = 26
         targetSdk = 34
-        versionCode = 7
-        versionName = "0.7"
+        versionCode = 9
+        versionName = "0.9"
     }
 
     // Same keystore the hand-rolled pipeline uses (android/dsh-debug.keystore).

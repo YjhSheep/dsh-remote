@@ -5,6 +5,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Only to notice a WiFi/移动数据 switch: WebActivity registers a default-network callback so
+         it can re-pick the upstream without the user reloading by hand. Runs on every API this app
+         supports (minSdk 26); if the permission is missing the app still works, just without the
+         automatic switch. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <application
         android:icon="@mipmap/ic_launcher"
