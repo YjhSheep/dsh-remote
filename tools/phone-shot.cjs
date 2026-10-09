@@ -21,7 +21,10 @@ const WS_PATH = path.join(
 const WebSocket = require(WS_PATH);
 const CHROME = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 const KEY = fs.readFileSync(path.join(__dirname, ".bridge-key"), "utf8").trim();
-const PORT_CDP = 9222;
+// Not 9222: an `adb forward tcp:9222 ...` (the phone's chrome_devtools_remote pattern)
+// makes adb.exe hold 127.0.0.1:9222, so Chrome can only bind ::1 there and every
+// request to 127.0.0.1:9222 dies as "socket hang up" / "no CDP page target".
+const PORT_CDP = 9333;
 
 // ---- page-side helpers (shipped to the page via toString()) -----------------
 

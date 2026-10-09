@@ -22,6 +22,7 @@ import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -72,6 +73,8 @@ public class WebActivity extends Activity {
   private TextView ovReason;
   private WebView web;
   private Tunnel tunnel;
+  /** Serves the shell's unchanged build outputs from disk; see {@link AssetCache}. */
+  private AssetCache cache;
   private ValueCallback<Uri[]> pendingUpload;
   private String lastUrl;
   private String target = "";
@@ -156,6 +159,7 @@ public class WebActivity extends Activity {
     // sideways with half the conversation off-screen. This is the only place the lock holds.
     // (setBuiltInZoomControls/setDisplayZoomControls are already false by default.)
     s.setSupportZoom(false);
+    cache = new AssetCache(this);
     web.setWebViewClient(new Client());
     web.setWebChromeClient(new Chrome());
     // notify.js (bridge-injected) raises phone notifications through this bridge.
@@ -592,6 +596,27 @@ public class WebActivity extends Activity {
   }
 
   private final class Client extends WebViewClient {
+    /**
+     * Keeps the shell's immutable bundles on the phone: without this every open re-pulled ~10 MB
+     * through the tunnel, which is the whole "重新打开加载太慢". Runs off the main thread, so the
+     * blocking fetch below is fine. Anything it cannot serve returns null and takes the normal
+     * network path, exactly as before this existed.
+     */
+    @Override
+    public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest req) {
+      if (!"GET".equals(req.getMethod())) return null;
+      Uri u = req.getUrl();
+      if (!isLoopbackHost(u.getHost())) return null;
+      String path = u.getEncodedPath();
+      if (path == null) return null;
+      long maxAge = AssetCache.maxAge(path);
+      if (maxAge == 0) return null;
+      // The query carries the content hash or the plugin rev, so it is part of the identity; for the
+      // /plugins/ combos it starts with a second '?' and has to be put back verbatim.
+      String query = u.getEncodedQuery();
+      return cache.serve(u.toString(), query == null ? path : path + "?" + query, maxAge);
+    }
+
     @Override
     public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
       Uri u = req.getUrl();

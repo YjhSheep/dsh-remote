@@ -97,6 +97,7 @@ const sha = (b) => crypto.createHash("sha256").update(b).digest("hex").slice(0, 
             .replace(/<script src="\/__bridge\/keyboard\.js"><\/script>/u, "")
             .replace(/<script src="\/__bridge\/notify\.js"><\/script>/u, "")
             .replace(/<script src="\/__bridge\/widget-idle\.js" defer><\/script>/u, "")
+            .replace(/<script src="\/__bridge\/sidebar\.js" defer><\/script>/u, "")
             .replace(/<script src="\/__bridge\/probe\.js" defer><\/script>/u, "")
             .replace(/, viewport-fit=cover/u, ""),
           "utf8",

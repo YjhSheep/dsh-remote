@@ -5,7 +5,11 @@
 （原生界面）在 v0.7 整块删除过，v0.11 又试了一版（`SessionsActivity`/`ChatActivity` + `DshClient`），
 **v0.12 再次整块删除，回到纯网页壳**，不再有任何原生 UI。
 
-当前版本 **versionCode 13 / versionName "0.13"**（`app/build.gradle.kts`）。v0.13 只比 v0.12 多一行
+当前版本 **versionCode 14 / versionName "0.14"**（`app/build.gradle.kts`）。v0.14 加了 `AssetCache.java`：
+`WebViewClient.shouldInterceptRequest` 把壳的静态资源（`/assets/`、`/plugins/` 组合包、`/dsh-whale/`
+下的媒体）存到手机本地，重新打开不再经隧道重下 —— 以前每次开屏要重下约 10 MB，跨境链路
+40–75 KB/s，这就是「重新打开加载太慢」的全部原因。策略只有 `AssetCache.maxAge(path)` 一个开关，
+回归测试见下面的「跑测试」。上一版 v0.13 只比 v0.12 多一行
 `WebSettings.setSupportZoom(false)`：WebView 默认允许捏合缩放，而它的缩放手势在原生层处理，
 页面里 `tools\bridge\mobile.css` 的 `touch-action` 拦不住，只能在这里关。
 
@@ -88,6 +92,21 @@ java -cp .\build\tunneltest app.dsh.remote.TunnelTest 3080 <密钥>
 
 六项断言：绑到 17800 / 端口被占时顺延到 17801 / `?k=` 换到 303 与 cookie / 带 cookie 取到页面 /
 正文完整 / 上游不通时回 502 页面。
+
+## 跑测试：本地缓存策略（不需要桥接、不需要真机）
+
+`AssetCache` 只有 `maxAge`（哪些路径可缓存 / 存多久）和 `mime`（回什么类型）是纯逻辑，把它按
+`app.dsh.remote` 包编一遍就能断言 —— `android.jar` 只是为了让 `AssetCache` 的 import 能解析，
+测试本身不碰平台：
+
+```powershell
+javac -encoding UTF-8 -cp .\android-sdk\platforms\android-34\android.jar -d .\build\cachetest app\src\main\java\app\dsh\remote\AssetCache.java test\AssetCacheTest.java
+java -cp ".\build\cachetest;.\android-sdk\platforms\android-34\android.jar" app.dsh.remote.AssetCacheTest
+```
+
+它盯的是两件**弄错也不会报错**的事：把被每秒轮询的 `/dsh-whale/*.json`（或 SSE 的
+`/plugins/events`、或必须实时的 `/__bridge/*`）当成可缓存资源，界面会永远停在旧数据上；把
+`/plugins/` 的组合包（URL 里没有扩展名）回成 `application/octet-stream`，浏览器会拒掉所有插件。
 
 ## 装到手机
 

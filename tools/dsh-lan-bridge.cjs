@@ -160,6 +160,9 @@ const KEYBOARD_JS = path.join(BRIDGE_DIR, "keyboard.js");
 // html[data-dsh-widget-idle] after a few seconds without a touch on the widget, which
 // mobile.css fades the button out on.
 const WIDGET_IDLE_JS = path.join(BRIDGE_DIR, "widget-idle.js");
+// On a phone the sidebar is a floating panel over the conversation (mobile.css). Picking a
+// session left it covering the chat until you tapped 收起侧边栏 again; this closes it.
+const SIDEBAR_JS = path.join(BRIDGE_DIR, "sidebar.js");
 const LAYOUT_JSON = path.join(__dirname, "layout.json");
 const APP_APK = path.join(__dirname, "..", "android", "dist", "dsh-remote.apk");
 
@@ -206,6 +209,7 @@ function injectHtml(html) {
     (fs.existsSync(KEYBOARD_JS) ? '<script src="/__bridge/keyboard.js"></script>' : "") +
     (fs.existsSync(NOTIFY_JS) ? '<script src="/__bridge/notify.js"></script>' : "") +
     (fs.existsSync(WIDGET_IDLE_JS) ? '<script src="/__bridge/widget-idle.js" defer></script>' : "") +
+    (fs.existsSync(SIDEBAR_JS) ? '<script src="/__bridge/sidebar.js" defer></script>' : "") +
     '<script src="/__bridge/probe.js" defer></script>';
   return /<\/body>/i.test(html) ? html.replace(/<\/body>/i, tags + "</body>") : html + tags;
 }
@@ -258,6 +262,7 @@ const server = http.createServer((req, res) => {
     if (u.pathname === "/__bridge/notify.js") return serveLocal(res, NOTIFY_JS, "text/javascript; charset=utf-8");
     if (u.pathname === "/__bridge/widget-idle.js")
       return serveLocal(res, WIDGET_IDLE_JS, "text/javascript; charset=utf-8");
+    if (u.pathname === "/__bridge/sidebar.js") return serveLocal(res, SIDEBAR_JS, "text/javascript; charset=utf-8");
     if (u.pathname === "/__bridge/probe" && req.method === "POST") return handleProbe(req, res);
     if (u.pathname === "/__bridge/state")
       return serveLocal(res, LAYOUT_JSON, "application/json; charset=utf-8");

@@ -1,6 +1,6 @@
 # 手机适配层（桥接注入）
 
-`tools/dsh-lan-bridge.cjs` 把 DSH 页面交给手机时，往 `<head>` 里插这五个文件和一个探针。
+`tools/dsh-lan-bridge.cjs` 把 DSH 页面交给手机时，往 `</body>` 前插这六个文件和一个探针。
 改这些文件（除了新增文件本身要重启一次桥接）**不用重启 DSH、也不用重装 App**：手机刷新一次页面就生效；改 `dsh-lan-bridge.cjs` 本身才需要重启桥接。
 
 | 文件 | 作用 |
@@ -11,6 +11,7 @@
 | `widget-idle.js` | 触屏上没有 hover，挂件自己会把 ☰（`dshwv-menu-btn`，三横）钉成常显，一直压在会话上。这个脚本在「几秒没碰挂件」时给 `<html>` 打 `data-dsh-widget-idle`，`mobile.css` 据此把它淡出并停掉点击；碰一下鲸鱼立刻回来。只有落在 `.dshwv-root` 里的触摸才算「碰」——翻页滚动不算，否则按钮等于没藏 |
 | `probe.js` | 真机布局几何上报到 `tools/layout.json`，只用于取证，不参与样式。其中 `zoom`（`visualViewport.scale`、meta viewport、页面能否横向滚）与 `hscroll`（能左右拖动的容器 + 未被裁剪祖先遮住的越界子元素）专治「手机说能左右拖/能缩放」这类误报 |
 | `notify.js` | 消息通知（v0.10）：页面里自订 DSH `$events` 流，任务完成 / 待确认 / 提问 → `AndroidBridge.notify(...)` 系统通知（正文带会话标题）；对 waterfall 事件静默旁观，不回 `$events/result` |
+| `sidebar.js` | 手机上从侧栏里**选中东西**后自动点一次 ☰ 把侧栏收起来。两类命中：**会话行**（`data-row-key` 以 `session:` 开头）和**面板入口那一组**（`nav[aria-label="全局面板"]` 里的插件 / 上下文洞察 / 技能中心）。侧栏在窄屏是浮层（`mobile.css` 里 767px 以下，面板 281px 盖住整块对话），而 dsh-client 只在点 ☰ 时复位 `narrowExpanded`，选中会话、打开面板都不会，于是刚打开的内容一直被盖着。**点项目行不收**（那是在展开该项目的会话列表，收了就没法接着选）；设置不收（`aria-haspopup="dialog"` 的全屏弹窗）；宽屏（≥1024）侧栏是常驻列，也不动手。收起前先确认侧栏确实展开着（`[class*="sidebarCol"]` 宽 > 100px），否则收起态点面板图标会把侧栏反过来点开 |
 
 `.dshwv-*` 是 `dsh-whale-widget`（`%USERPROFILE%\.dsh\profiles\desktop\node_modules\dsh-whale-widget\assets\whale-widget.js`）的类名；
 `mobile.css` 里每条规则上面都写了它挡住的实测数字，改之前先读那段注释。
