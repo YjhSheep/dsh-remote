@@ -1,10 +1,13 @@
 # DSH 遥控（Android）
 
 一个极薄的 WebView 壳：手机上打开电脑里的 DSH，并把访问密钥存在 App 里、地址栏省掉。
-包里**只有这一个界面**（v0.7 起）：打开 App 直接显示 DSH 的完整网页界面；原先 App 自绘的
-会话列表/聊天页（原生界面）已**在 v0.7 整块删除**，不再有任何原生 UI。
+包里**只有这一个界面**：打开 App 直接显示 DSH 的完整网页界面；App 自绘的会话列表/聊天页
+（原生界面）在 v0.7 整块删除过，v0.11 又试了一版（`SessionsActivity`/`ChatActivity` + `DshClient`），
+**v0.12 再次整块删除，回到纯网页壳**，不再有任何原生 UI。
 
-当前版本 **versionCode 9 / versionName "0.9"**（`app/build.gradle.kts`）。
+当前版本 **versionCode 13 / versionName "0.13"**（`app/build.gradle.kts`）。v0.13 只比 v0.12 多一行
+`WebSettings.setSupportZoom(false)`：WebView 默认允许捏合缩放，而它的缩放手势在原生层处理，
+页面里 `tools\bridge\mobile.css` 的 `touch-action` 拦不住，只能在这里关。
 
 ## 为什么中间要有一条本机隧道
 
@@ -115,13 +118,19 @@ java -cp .\build\tunneltest app.dsh.remote.TunnelTest 3080 <密钥>
 设置窗口里有 **测试连接**：不退出就能知道这个地址通不通，结果就地显示在下面（绿色=能连上，红色=连不上）。
 配色跟随系统深浅色：系统开深色时，App 外壳与 DSH 页面都会变深。
 
+v0.10 起支持系统通知：DSH 里有会话需要你回应时，桥接注入的 `notify.js` 通过
+`AndroidBridge` 弹一条通知，点它回到 App。首次启动会申请 `POST_NOTIFICATIONS`，拒绝也不影响别的功能。
+
 ## 目录
 
 ```
-app/AndroidManifest.xml          权限（INTERNET + ACCESS_NETWORK_STATE）、Activity、软键盘 adjustResize、启动器图标
+app/AndroidManifest.xml          权限（INTERNET + ACCESS_NETWORK_STATE + POST_NOTIFICATIONS）、Activity、软键盘 adjustResize、启动器图标
 app/res/                         strings / styles / layout / menu / mipmap（图标）
 app/java/app/dsh/remote/Tunnel.java        127.0.0.1 裸 TCP 转发
 app/java/app/dsh/remote/WebActivity.java   网页壳：顶栏/状态 + WebView + 设置 + 文件选择
+app/java/app/dsh/remote/Prefs.java         地址/密钥/信标的解析与存储
+app/java/app/dsh/remote/Upstream.java      信标 + 局域网优选（v0.8 逻辑，v0.11 抽成类）
+app/java/app/dsh/remote/AndroidBridge.java 通知桥（v0.10）：桥接注入的 notify.js 经它弹系统通知
 icon/1.1.ico                     图标原图（make-icon.py 的输入）
 make-icon.py                     原图 → mipmap 各密度 + 自适应图标前景
 bootstrap-sdk.ps1 / gradle-build.ps1  下载 SDK / Gradle 构建

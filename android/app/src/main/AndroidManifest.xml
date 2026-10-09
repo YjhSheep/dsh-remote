@@ -11,6 +11,11 @@
          automatic switch. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- Android 13 asks for POST_NOTIFICATIONS at runtime; below 33 it is granted at
+         install. Without it NotificationManager.notify is a silent no-op, so the page
+         still works, it just cannot raise notifications. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"

@@ -5,7 +5,6 @@ import android.app.AlertDialog;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.net.ConnectivityManager;
 import android.net.Network;
@@ -37,18 +36,7 @@ import androidx.core.view.OnApplyWindowInsetsListener;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
-import java.net.InetSocketAddress;
-import java.net.Socket;
-import java.net.URL;
-import java.util.ArrayList;
-import java.util.List;
-
-import org.json.JSONArray;
-import org.json.JSONObject;
 
 /**
  * A thin WebView around the desktop DSH, reached over a loopback tunnel (see {@link Tunnel}).
@@ -62,7 +50,6 @@ import org.json.JSONObject;
  */
 public class WebActivity extends Activity {
   private static final String TAG = "dsh-remote";
-  private static final String PREFS = "dsh-remote";
   private static final int LOCAL_PORT = 17800;
   /**
    * The host the WebView loads: loopback, so the page is a secure context (the DSH client calls
@@ -74,15 +61,7 @@ public class WebActivity extends Activity {
    * public address. localhost resolves to the same loopback listener.
    */
   private static final String LOCAL_HOST = "localhost";
-  private static final int DEFAULT_PORT = 3080;
   private static final int PICK_FILES = 41;
-  /**
-   * How long one direct-lan probe may take. Deliberately short: a dead candidate must not delay the
-   * next one, and the fallback (the configured address) already costs a round trip of its own.
-   */
-  private static final int PROBE_TIMEOUT_MS = 700;
-  /** How long the configured address is given to answer {@code /__bridge/lan.json}. */
-  private static final int BEACON_TIMEOUT_MS = 2000;
   /** Settling time after a network change: Android reports one flap as several events in a row. */
   private static final long RENEW_DELAY_MS = 1500;
 
@@ -171,13 +150,21 @@ public class WebActivity extends Activity {
     s.setDomStorageEnabled(true);
     s.setUseWideViewPort(true);
     s.setLoadWithOverviewMode(true);
+    // Zoom lock. setSupportZoom defaults to true and WebView's pinch/double-tap scale runs in the
+    // native layer, below the page: the `touch-action: pan-x pan-y` lock in mobile.css does not
+    // reach it, so on the phone a pinch still scaled the page and it could then be dragged
+    // sideways with half the conversation off-screen. This is the only place the lock holds.
+    // (setBuiltInZoomControls/setDisplayZoomControls are already false by default.)
+    s.setSupportZoom(false);
     web.setWebViewClient(new Client());
     web.setWebChromeClient(new Chrome());
+    // notify.js (bridge-injected) raises phone notifications through this bridge.
+    AndroidBridge.attach(this, web);
 
     handler = new Handler(Looper.getMainLooper());
     startWatchingNetwork();
 
-    if (prefs().getString("host", "").isEmpty()) {
+    if (!Prefs.ready(this)) {
       bar.setSubtitle(R.string.st_idle);
       showOverlay(R.string.setup_title, getString(R.string.setup_run));
       showSetup();
@@ -210,11 +197,7 @@ public class WebActivity extends Activity {
   @Override
   protected void onResume() {
     super.onResume();
-    if (!prefs().getString("host", "").isEmpty()) scheduleRenew();
-  }
-
-  private SharedPreferences prefs() {
-    return getSharedPreferences(PREFS, MODE_PRIVATE);
+    if (Prefs.ready(this)) scheduleRenew();
   }
 
   private void stopTunnel() {
@@ -310,10 +293,9 @@ public class WebActivity extends Activity {
    */
   private void open() {
     stopTunnel();
-    SharedPreferences p = prefs();
-    final String host = p.getString("host", "");
-    final int port = p.getInt("port", DEFAULT_PORT);
-    final String key = p.getString("key", "");
+    final String host = Prefs.host(this);
+    final int port = Prefs.port(this);
+    final String key = Prefs.key(this);
     if (host.isEmpty()) return;
     selecting = true;
     setStatus(R.string.st_connecting);
@@ -327,7 +309,7 @@ public class WebActivity extends Activity {
               public void run() {
                 String[] chosen;
                 try {
-                  chosen = chooseUpstream(host, port, key);
+                  chosen = Upstream.choose(WebActivity.this, host, port, key);
                 } catch (Throwable t) {
                   Log.w(TAG, "cannot pick an upstream: " + t);
                   chosen = new String[] {host, String.valueOf(port)};
@@ -347,7 +329,7 @@ public class WebActivity extends Activity {
     pick.start();
   }
 
-  /** Bind the loopback port and load, against an upstream already chosen by {@link #chooseUpstream}. */
+  /** Bind the loopback port and load, against an upstream already chosen by {@link Upstream#choose}. */
   private void connect(final String host, final int port, String key) {
     selecting = false;
     target = host + ":" + port;
@@ -375,7 +357,7 @@ public class WebActivity extends Activity {
             new Runnable() {
               @Override
               public void run() {
-                final String problem = probeUpstream(host, port);
+                final String problem = Upstream.probe(host, port);
                 runOnUiThread(
                     new Runnable() {
                       @Override
@@ -394,103 +376,18 @@ public class WebActivity extends Activity {
     probe.start();
   }
 
-  /**
-   * Which address the loopback tunnel should forward to.
-   *
-   * <p>The configured address is used as a beacon. A phone moves between networks - home, office,
-   * mobile data - and each move changes the PC's LAN address, while the configured address is meant
-   * to be the one that survives every network (a frp tunnel, or a fixed LAN address). So we ask the
-   * beacon itself for the PC's current LAN addresses, also keep the last winner in prefs (that
-   * covers the beacon being briefly unreachable right after boot), and take the first candidate a
-   * plain TCP connect reaches. The beacon is what DSH calls last, so a same-LAN phone stops paying
-   * for a public round trip on every request.
-   *
-   * @return {host, port} of the winner, falling back to the configured address when nothing answers.
-   */
-  private String[] chooseUpstream(String beaconHost, int beaconPort, String key) {
-    List<String[]> candidates = new ArrayList<String[]>();
-    String cached = prefs().getString("lanHost", "");
-    if (!cached.isEmpty()) addCandidate(candidates, cached, prefs().getInt("lanPort", 0));
-    for (String[] a : fetchLanCandidates(beaconHost, beaconPort, key)) {
-      addCandidate(candidates, a[0], Integer.parseInt(a[1]));
-    }
-    for (String[] c : candidates) {
-      int port = Integer.parseInt(c[1]);
-      if (probeUpstream(c[0], port, PROBE_TIMEOUT_MS) == null) {
-        Log.i(TAG, "upstream " + c[0] + ":" + port + " answered directly (" + candidates.size() + " candidate(s))");
-        prefs().edit().putString("lanHost", c[0]).putInt("lanPort", port).apply();
-        return c;
-      }
-      Log.i(TAG, "upstream " + c[0] + ":" + port + " did not answer");
-    }
-    if (!candidates.isEmpty()) {
-      Log.i(TAG, "no LAN address answered, using the configured " + beaconHost + ":" + beaconPort);
-    }
-    return new String[] {beaconHost, String.valueOf(beaconPort)};
-  }
-
-  /** Keeps the candidate list free of duplicates without reordering it (first wins the probe). */
-  private static void addCandidate(List<String[]> list, String host, int port) {
-    if (host == null || host.isEmpty() || port <= 0) return;
-    for (String[] c : list) {
-      if (c[0].equals(host) && Integer.parseInt(c[1]) == port) return;
-    }
-    list.add(new String[] {host, String.valueOf(port)});
-  }
-
-  /**
-   * The PC's live LAN address list, read through the beacon ({@code /__bridge/lan.json}).
-   *
-   * <p>Empty whenever the beacon does not answer - which is normal on a phone that just left one
-   * network for another - because the cached address is then the only lead left.
-   */
-  private List<String[]> fetchLanCandidates(String host, int port, String key) {
-    List<String[]> out = new ArrayList<String[]>();
-    HttpURLConnection c = null;
-    try {
-      c = (HttpURLConnection) new URL("http://" + host + ":" + port + "/__bridge/lan.json").openConnection();
-      c.setConnectTimeout(BEACON_TIMEOUT_MS);
-      c.setReadTimeout(BEACON_TIMEOUT_MS);
-      c.setRequestProperty("Cookie", "dsh-bridge=" + key);
-      int code = c.getResponseCode();
-      if (code != 200) {
-        Log.i(TAG, "lan.json -> " + code + " via the configured " + host + ":" + port);
-        return out;
-      }
-      StringBuilder body = new StringBuilder();
-      BufferedReader reader = new BufferedReader(new InputStreamReader(c.getInputStream(), "UTF-8"));
-      String line;
-      while ((line = reader.readLine()) != null) body.append(line);
-      reader.close();
-      JSONObject json = new JSONObject(body.toString());
-      JSONArray addresses = json.optJSONArray("addresses");
-      int lanPort = json.optInt("port", DEFAULT_PORT);
-      for (int i = 0; addresses != null && i < addresses.length(); i++) {
-        String a = addresses.optString(i, "");
-        if (!a.isEmpty()) out.add(new String[] {a, String.valueOf(lanPort)});
-      }
-      Log.i(TAG, "lan.json -> " + out.size() + " candidate(s) via the configured " + host + ":" + port);
-    } catch (Exception e) {
-      Log.i(TAG, "lan.json failed via the configured " + host + ":" + port + ": " + e);
-    } finally {
-      if (c != null) c.disconnect();
-    }
-    return out;
-  }
-
   /** A network change: re-pick once it has settled, and reload only if that changes the address. */
   private void renewUpstream() {
-    SharedPreferences p = prefs();
-    final String host = p.getString("host", "");
-    final int port = p.getInt("port", DEFAULT_PORT);
-    final String key = p.getString("key", "");
+    final String host = Prefs.host(this);
+    final int port = Prefs.port(this);
+    final String key = Prefs.key(this);
     if (host.isEmpty()) return;
     Thread renew =
         new Thread(
             new Runnable() {
               @Override
               public void run() {
-                final String[] chosen = chooseUpstream(host, port, key);
+                final String[] chosen = Upstream.choose(WebActivity.this, host, port, key);
                 runOnUiThread(
                     new Runnable() {
                       @Override
@@ -548,28 +445,6 @@ public class WebActivity extends Activity {
     handler.postDelayed(renewTask, RENEW_DELAY_MS);
   }
 
-  /** @return null when the bridge accepts a connection, otherwise what went wrong. */
-  private static String probeUpstream(String host, int port) {
-    return probeUpstream(host, port, 4000);
-  }
-
-  /** The same check with the caller's own patience - a candidate probe wants a much shorter one. */
-  private static String probeUpstream(String host, int port, int timeoutMs) {
-    Socket s = new Socket();
-    try {
-      s.connect(new InetSocketAddress(host, port), timeoutMs);
-      return null;
-    } catch (IOException e) {
-      return e.toString();
-    } finally {
-      try {
-        s.close();
-      } catch (IOException ignored) {
-        // nothing to clean up
-      }
-    }
-  }
-
   /** True for the hosts the local tunnel answers on: localhost, IPv6 loopback, and all of 127/8. */
   private static boolean isLoopbackHost(String host) {
     return host != null
@@ -604,25 +479,24 @@ public class WebActivity extends Activity {
   }
 
   private void showSetup() {
-    final SharedPreferences p = prefs();
     View form = LayoutInflater.from(this).inflate(R.layout.dialog_setup, null);
     final EditText link = (EditText) form.findViewById(R.id.setup_link);
     final EditText key = (EditText) form.findViewById(R.id.setup_key);
     final TextView probe = (TextView) form.findViewById(R.id.setup_probe);
     TextView note = (TextView) form.findViewById(R.id.setup_note);
-    link.setText(p.getString("link", ""));
-    key.setText(p.getString("key", ""));
-    String host = p.getString("host", "");
+    link.setText(Prefs.link(this));
+    key.setText(Prefs.key(this));
+    String host = Prefs.host(this);
     if (!host.isEmpty()) {
-      int port = p.getInt("port", DEFAULT_PORT);
+      int port = Prefs.port(this);
       // The LAN address reached directly last time is what the next launch probes first, so it is
       // worth showing next to the configured one.
-      String lan = p.getString("lanHost", "");
+      String lan = Prefs.lanHost(this);
       note.setText(
           lan.isEmpty()
               ? getString(R.string.setup_note_map, LOCAL_PORT, host, port)
               : getString(
-                  R.string.setup_note_lan, LOCAL_PORT, host, port, lan, p.getInt("lanPort", port)));
+                  R.string.setup_note_lan, LOCAL_PORT, host, port, lan, Prefs.lanPort(this)));
     }
     form.findViewById(R.id.setup_test)
         .setOnClickListener(
@@ -659,7 +533,7 @@ public class WebActivity extends Activity {
             new Runnable() {
               @Override
               public void run() {
-                final String problem = probeUpstream(t[0], Integer.parseInt(t[1]));
+                final String problem = Upstream.probe(t[0], Integer.parseInt(t[1]));
                 runOnUiThread(
                     new Runnable() {
                       @Override
@@ -680,36 +554,25 @@ public class WebActivity extends Activity {
     thread.start();
   }
 
-  /** Accepts "192.168.31.216:3080" or the full "http://.../?k=KEY" the bridge prints. */
+  /**
+   * Accepts "192.168.31.216:3080" or the full "http://.../?k=KEY" the bridge prints.
+   *
+   * <p>{@link Prefs#parse} owns the rules; this only turns its "that is not an address" into the
+   * toast this form shows, and null means it was not one.
+   */
   private String[] parse(String raw, String typedKey) {
-    String text = raw.trim();
-    if (text.isEmpty()) {
-      toast(getString(R.string.err_no_addr));
+    try {
+      return Prefs.parse(this, raw, typedKey);
+    } catch (IllegalArgumentException e) {
+      toast(e.getMessage());
       return null;
     }
-    if (!text.contains("://")) text = "http://" + text;
-    Uri u = Uri.parse(text);
-    String host = u.getHost();
-    if (host == null || host.isEmpty()) {
-      toast("地址看不懂：" + raw);
-      return null;
-    }
-    int port = u.getPort() > 0 ? u.getPort() : DEFAULT_PORT;
-    String key = typedKey.trim();
-    if (key.isEmpty() && u.getQueryParameter("k") != null) key = u.getQueryParameter("k");
-    return new String[] {host, String.valueOf(port), key};
   }
 
   private void save(String raw, String typedKey) {
     String[] t = parse(raw, typedKey);
     if (t == null) return;
-    prefs()
-        .edit()
-        .putString("link", "http://" + t[0] + ":" + t[1])
-        .putString("host", t[0])
-        .putInt("port", Integer.parseInt(t[1]))
-        .putString("key", t[2])
-        .apply();
+    Prefs.store(this, t[0], Integer.parseInt(t[1]), t[2], t[3]);
     open();
   }
 

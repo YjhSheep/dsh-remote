@@ -148,6 +148,7 @@ const GATE_PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" co
 // geometry, not guesses), and tools/bridge/mobile.css, served live so a change
 // is visible on the phone after a refresh — no DSH restart, no profile edit.
 const BRIDGE_DIR = path.join(__dirname, "bridge");
+const NOTIFY_JS = path.join(BRIDGE_DIR, "notify.js");
 const PROBE_JS = path.join(BRIDGE_DIR, "probe.js");
 const MOBILE_CSS = path.join(BRIDGE_DIR, "mobile.css");
 const HOST_TRUST_JS = path.join(BRIDGE_DIR, "owns-host.js");
@@ -155,6 +156,10 @@ const HOST_TRUST_JS = path.join(BRIDGE_DIR, "owns-host.js");
 // floating widget out of the composer's way without relying on :focus (Android
 // keeps the field focused after the IME is dismissed, which hid it for good).
 const KEYBOARD_JS = path.join(BRIDGE_DIR, "keyboard.js");
+// Touch devices have no hover, so the widget's ☰ is on screen for good; this marks
+// html[data-dsh-widget-idle] after a few seconds without a touch on the widget, which
+// mobile.css fades the button out on.
+const WIDGET_IDLE_JS = path.join(BRIDGE_DIR, "widget-idle.js");
 const LAYOUT_JSON = path.join(__dirname, "layout.json");
 const APP_APK = path.join(__dirname, "..", "android", "dist", "dsh-remote.apk");
 
@@ -199,6 +204,8 @@ function injectHtml(html) {
     // Owns-host is NOT deferred: it has to be installed before any module script runs.
     (fs.existsSync(HOST_TRUST_JS) ? '<script src="/__bridge/owns-host.js"></script>' : "") +
     (fs.existsSync(KEYBOARD_JS) ? '<script src="/__bridge/keyboard.js"></script>' : "") +
+    (fs.existsSync(NOTIFY_JS) ? '<script src="/__bridge/notify.js"></script>' : "") +
+    (fs.existsSync(WIDGET_IDLE_JS) ? '<script src="/__bridge/widget-idle.js" defer></script>' : "") +
     '<script src="/__bridge/probe.js" defer></script>';
   return /<\/body>/i.test(html) ? html.replace(/<\/body>/i, tags + "</body>") : html + tags;
 }
@@ -248,6 +255,9 @@ const server = http.createServer((req, res) => {
       return serveLocal(res, HOST_TRUST_JS, "text/javascript; charset=utf-8");
     if (u.pathname === "/__bridge/keyboard.js")
       return serveLocal(res, KEYBOARD_JS, "text/javascript; charset=utf-8");
+    if (u.pathname === "/__bridge/notify.js") return serveLocal(res, NOTIFY_JS, "text/javascript; charset=utf-8");
+    if (u.pathname === "/__bridge/widget-idle.js")
+      return serveLocal(res, WIDGET_IDLE_JS, "text/javascript; charset=utf-8");
     if (u.pathname === "/__bridge/probe" && req.method === "POST") return handleProbe(req, res);
     if (u.pathname === "/__bridge/state")
       return serveLocal(res, LAYOUT_JSON, "application/json; charset=utf-8");

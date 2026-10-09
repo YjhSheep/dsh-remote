@@ -95,6 +95,8 @@ const sha = (b) => crypto.createHash("sha256").update(b).digest("hex").slice(0, 
             .replace(/<link rel="stylesheet" href="\/__bridge\/mobile\.css">/u, "")
             .replace(/<script src="\/__bridge\/owns-host\.js"><\/script>/u, "")
             .replace(/<script src="\/__bridge\/keyboard\.js"><\/script>/u, "")
+            .replace(/<script src="\/__bridge\/notify\.js"><\/script>/u, "")
+            .replace(/<script src="\/__bridge\/widget-idle\.js" defer><\/script>/u, "")
             .replace(/<script src="\/__bridge\/probe\.js" defer><\/script>/u, "")
             .replace(/, viewport-fit=cover/u, ""),
           "utf8",
@@ -112,7 +114,11 @@ const sha = (b) => crypto.createHash("sha256").update(b).digest("hex").slice(0, 
   const a = strip(viaBridge.body);
   const b = strip(direct.body);
   console.log(`    => ${a && b && a.equals(b) ? "IDENTICAL once the injected layer is removed" : "DIFFERENT (page was changed by the proxy!)"}`);
-  if (viaBridge.body) fs.writeFileSync(path.join(ROOT, "tmp", "bridge-index.html"), viaBridge.body);
+  if (viaBridge.body) {
+    const out = path.join(ROOT, "tmp", "bridge-index.html");
+    fs.mkdirSync(path.dirname(out), { recursive: true });
+    fs.writeFileSync(out, viaBridge.body);
+  }
 
   console.log("[2] SSE /plugins/events through the bridge");
   const sse = await readStream(LAN, PORT, "/plugins/events", { cookie: `dsh-bridge=${KEY}` });

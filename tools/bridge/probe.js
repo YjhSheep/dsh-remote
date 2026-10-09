@@ -86,6 +86,73 @@
         scrollW: document.documentElement.scrollWidth,
         scrollH: document.documentElement.scrollHeight,
       },
+      // Two phone complaints in one place. (1) "it can be dragged left and right": is the PAGE
+      // really horizontally scrollable? Ask it by scrolling 40px and putting it back — measured on
+      // the phone the answer was no (scrollLeft stays 0), and the panning turned out to be the chat
+      // scroller instead: see `hscroll` below. (2) "pinch still zooms": vv.scale after a pinch says
+      // whether the gesture reached the page at all (the App sets setSupportZoom(false) since v0.13).
+      zoom: (function () {
+        var se = document.scrollingElement || document.documentElement;
+        var meta = document.querySelector('meta[name="viewport"]');
+        var before = se.scrollLeft;
+        se.scrollLeft = 40;
+        var after = se.scrollLeft;
+        se.scrollLeft = before;
+        return {
+          scale: vv && vv.scale,
+          vvOffsetLeft: vv && Math.round(vv.offsetLeft),
+          metaContent: meta ? meta.getAttribute("content") : null,
+          canScrollX: after > 0,
+          scrollLeftAsked: 40,
+          scrollLeftAfter: after,
+          docScrollW: document.documentElement.scrollWidth,
+          bodyScrollW: document.body.scrollWidth,
+          innerWidth: innerWidth,
+        };
+      })(),
+      // Containers a finger can pan sideways: overflow-x auto/scroll with content wider than the
+      // box. The chat column is the one that matters — when IT pans, the whole conversation slides
+      // left and right and text looks cut off, which is not zoom at all.
+      hscroll: (function () {
+        var out = [];
+        var all = document.querySelectorAll("body *");
+        for (var i = 0; i < all.length && out.length < 15; i++) {
+          var el = all[i];
+          var cs = getComputedStyle(el);
+          if (cs.overflowX !== "auto" && cs.overflowX !== "scroll") continue;
+          if (el.scrollWidth <= el.clientWidth + 1) continue;
+          var before = el.scrollLeft;
+          el.scrollLeft = 40;
+          var after = el.scrollLeft;
+          el.scrollLeft = before;
+          // What makes the box pan: skip anything inside a clipping ancestor — a 4000px code line
+          // inside overflow:hidden does not widen the scroller, so only unclipped overflow counts.
+          var lim = el.getBoundingClientRect().left + el.clientWidth + 1;
+          var offenders = [];
+          var kids = el.querySelectorAll("*");
+          for (var j = 0; j < kids.length; j++) {
+            var k = kids[j];
+            var kb = k.getBoundingClientRect();
+            if (kb.width === 0 || kb.right <= lim) continue;
+            var clipped = false;
+            for (var p = k.parentElement; p && p !== el; p = p.parentElement)
+              if (getComputedStyle(p).overflowX !== "visible") { clipped = true; break; }
+            if (clipped) continue;
+            offenders.push({ el: name(k), rect: slim(k), right: Math.round(kb.right) });
+          }
+          offenders.sort(function (a, b) { return b.right - a.right; });
+          out.push({
+            el: name(el),
+            rect: slim(el),
+            clientW: el.clientWidth,
+            scrollW: el.scrollWidth,
+            canPanX: after > 0,
+            overflowX: cs.overflowX,
+            offenders: offenders.slice(0, 10),
+          });
+        }
+        return out;
+      })(),
       safeArea: {
         top: inset("top"),
         right: inset("right"),

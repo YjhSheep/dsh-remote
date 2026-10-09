@@ -320,6 +320,11 @@ function connect(url, watch) {
     await send("Page.enable");
     await send("Runtime.enable");
     await send("Network.enable");
+    // Headless Chrome counts the window as unfocused and then silently drops
+    // focus/focusin events (activeElement still moves), which makes any
+    // focus-driven behaviour untestable here. This makes the page believe it
+    // has focus, so the events fire the way they do on the phone.
+    await send("Emulation.setFocusEmulationEnabled", { enabled: true });
     await send("Emulation.setDeviceMetricsOverride", {
       width: W,
       height: H,

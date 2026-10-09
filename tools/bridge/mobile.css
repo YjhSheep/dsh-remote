@@ -49,6 +49,15 @@
     width: 30px;
     height: 30px;
   }
+  /* A touch device has no hover, so the widget pins its ☰ visible for good (see
+     tools/bridge/widget-idle.js) and it sits on top of the conversation. That script
+     marks this while the user has not touched the widget for 3 s; !important because
+     the widget's own .dshwv-menu-btn-visible{opacity:1} would otherwise win.
+     pointer-events off so the hidden button stops swallowing taps. */
+  html[data-dsh-widget-idle] .dshwv-menu-btn {
+    opacity: 0 !important;
+    pointer-events: none !important;
+  }
 
   /* Whale balloon text was painted outside the drawn bubble.
      The bubble is an SVG path inside .dshwv-pop (viewBox 0 0 1026 700) whose
@@ -70,6 +79,17 @@
        without that the clip shrinks to 0.75 of the bubble and cuts glyphs that
        are inside it. */
     clip-path: ellipse(73.5% 69.1% at 50% 50%);
+  }
+  /* That rule is !important, so it also outranks the widget's own counter-flip
+     for the mirrored state. When the pet snaps into the flip zone the widget
+     mirrors the whole root (.dshwv-root.dshwv-left{transform:scaleX(-1)},
+     whale-widget.js:367) and un-mirrors the sprite (:405) and the text (:415)
+     again — but :415 carries no !important, so ours won and the balloon's
+     characters rendered mirrored while the whale stayed upright. Re-state the
+     counter-flip in the widget's own order; scale(0.75) and scaleX(-1) commute,
+     so the shrink above is unchanged. */
+  .dshwv-root.dshwv-left .dshwv-text {
+    transform: translate(-50%, -50%) scale(0.75) scaleX(-1) !important;
   }
   .dshwv-text,
   .dshwv-text .dshwv-label,
@@ -176,5 +196,106 @@
   /* Settings dialog: centred with a 24px inset, which the gesture bar eats into. */
   .wCInkW_overlay {
     padding-bottom: calc(24px + var(--dsh-safe-bottom, 0px));
+  }
+  /* Composer meta row (turn count / tokens / cache hits). The dock is only 305px wide here and
+     lays its children out nowrap, so the two pills get squeezed: .iq1doa_label is a block flex item
+     with overflow:hidden, which zeroes its automatic minimum size, and it collapses to 68px against
+     124px of text ("6 轮 337 步·157 tok/s" showed as "6 轮 337 步…"). Measured at 400x700: labels
+     68/124 and 80/142. Keeping the labels at max-content stops the shrink; letting the pill row wrap
+     then stacks the two pills (160px and 178px) instead of clipping them, at the cost of one extra
+     ~22px line in the composer. */
+  .iq1doa_label {
+    min-width: max-content;
+  }
+  .iq1doa_root {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+  /* Same row, other direction: the trailing controls refuse to shrink. The app pins
+     .RlGAzG_trailing at `flex-shrink: 0`, so the model chip (293px) plus the send button (34px)
+     plus their 8px gap keep their content width inside a 305px card. Measured at 400x772: the row
+     is 343px wide and ends at x=423, i.e. 23px off the right edge, and the overflow sits inside
+     .Dc7zOa_scrollBody — the chat's own scroller (overflow-x: auto, clientWidth 337, scrollWidth
+     367) — so the page itself never overflows (document.scrollWidth = 400) and the sideways drag
+     the user reported is the CONVERSATION panning, not the page and not zoom: the send button
+     slides out of view. Letting the row shrink fixes it at the root: ._3_LLuW_chipModel already
+     carries overflow:hidden + text-overflow:ellipsis, so the model name ellipsizes instead of
+     pushing the button off-screen (measured after: scrollWidth 337 = clientWidth, no pan). */
+  .RlGAzG_trailing {
+    flex-shrink: 1;
+    min-width: 0;
+  }
+  /* Pinch-zoom. The App's WebView leaves setSupportZoom at its default (true) and the page's own
+     meta viewport is just `width=device-width, initial-scale=1`, so a two-finger gesture zooms the
+     page in and from then on it can be panned left and right — the chat slides off-screen and only
+     part of it is readable. `pan-x pan-y` keeps ordinary panning/scrolling but drops `pinch-zoom`,
+     which is what Blink checks before letting a gesture change the page scale. The effective value
+     of an element is the intersection of its own and its ancestors', so html+body covers the page;
+     an app rule on a specific element still wins over this. This is only a fallback: measured on the
+     phone it did not stop the pinch, because WebView's scale gesture is handled in its native layer,
+     below the page — v0.13 closes it there with `WebSettings.setSupportZoom(false)`
+     (`WebActivity.java:158`). Keep this rule anyway for any non-WebView browser. */
+  html,
+  body {
+    touch-action: pan-x pan-y;
+  }
+  /* Sidebar: the frame is a 3-column grid and the app widens column 1 inline from 56px (icon rail)
+     to 280px (full panel), which squeezes the conversation to 120px — the chat reflows one
+     character per line. Below 768px, keep the rail's 56px column and float the expanded panel over
+     the conversation, so the chat keeps its full 344px width underneath. 767px is measured, not
+     guessed: at 768 the right panel opens as its own grid column (inline becomes
+     `56px minmax(400px,1fr) minmax(0px,346px)`), at 700 and below it never does — so hardcoding
+     the third column to 0 here cannot cost the right panel anything. `.BynINW_sidebarCol` gets no
+     width on purpose: it shrinks to fit the rail (55px) or the panel (280px) by itself. */
+  @media (max-width: 767px) {
+    .BynINW_frame {
+      grid-template-columns: 56px minmax(0px, 1fr) minmax(0px, 0px) !important;
+    }
+    .BynINW_sidebarCol {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      z-index: 12;
+    }
+    /* The three columns are auto-placed, so taking the sidebar out of flow would slide the
+       conversation into column 1 (56px wide). Pin them. */
+    .BynINW_centerCol {
+      grid-column: 2;
+    }
+    .BynINW_rightbarCol {
+      grid-column: 3;
+    }
+  }
+  /* Composer popovers (the level/model panel and its model list) are anchored to the viewport by the
+     app: the panel's inline `left` is a negative offset from the chip's own root that lands it at
+     x=16 — but the conversation is scrolled by .Dc7zOa_scrollBody, whose scrollport is
+     [56,76,342,624] at 400x700, and a scrollport clips everything outside it. The panel starts at
+     x=16, so its left 40px are cut off, which is what the user saw: the list's group names read "ian"
+     for "bailian" and "epseek-V4-Flash" for "Deepseek-V4-Flash", and elementFromPoint returns the
+     header/tab bar for any point above y=76. Hiding the rail or lowering its z-index changes nothing
+     (measured) — this is the scrollport, not paint order, and the scrollport cannot be opened up
+     because it is what makes the conversation scroll. Nudging the panel right by the rail's width
+     brings it inside; `margin-left` rather than `left`, because the panel's containing block is the
+     chip's root (x=319 at this width), so a fixed `left` would have to track it. The width cap keeps
+     the right edge 8px inside the scrollport on narrower phones (at 360px the app's own width would
+     overflow it). */
+  ._3_LLuW_panel {
+    margin-left: 40px;
+    width: min(336px, calc(100vw - 64px));
+    max-width: calc(100vw - 64px);
+  }
+  /* The app caps the model list at `max-height: min(220px, -96px + 100vh)` and auto-expands the group
+     holding the current model without scrolling it into view. Eight group headers alone fill 220px, so
+     no model was visible at all: measured at 400x700 the box is 228px tall, the expanded group's first
+     option sits at y=543 against a box bottom of 555, and scrollTop stays 0. The same numbers come out
+     at 1200x800 — not a phone-only regression, but 220px is the whole screen on a phone. The list's
+     bottom is 58px above the panel's bottom and the panel's bottom is 87px above the viewport's (both
+     measured), so its bottom is 100vh - 145px; keeping its top below the scrollport's y=76 therefore
+     allows 100vh - 221px, about eight models at once here. The last 8px are the menu's own vertical
+     padding: the app leaves box-sizing at content-box, so padding sits outside max-height (measured:
+     max-height 479px gives a 487px border box whose top, 68, is 8px under the header). */
+  ._3_LLuW_modelMenu {
+    max-height: min(70vh, calc(100vh - 221px - 8px));
   }
 }
