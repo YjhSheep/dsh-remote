@@ -16,6 +16,8 @@ android/android-sdk/
 android/dl/
 android/build/
 tmp/
+# .tmp/ ：仓库根下的一次性临时产物（离线页预览、快照样本、临时探针脚本）
+.tmp/
 
 # ---- Gradle 构建（工具链可重下，产物可重建）----
 # android/tools/ ：JDK 17 + Gradle 8.9 解包，约 700 MB

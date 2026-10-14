@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>离线 · DeepSeek Harness</title>
+<style>
+  /* The shell's own palette (res/values/colors.xml and its night twin), so the offline page is
+     the same surface as the rest of the app rather than a browser error dressed up. */
+  :root {
+    --bg: #ffffff; --ink: #1a1a1a; --dim: #8a8a8e; --line: #dce0ea;
+    --brand: #4d6bfe; --on-brand: #ffffff; --ghost: rgba(77,107,254,.08);
+    --card: #f7f8fa; --ok: #16a34a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151517; --ink: #ececec; --dim: #9a9aa0; --line: #33333a;
+      --brand: #252b3d; --on-brand: #e8ecff; --ghost: rgba(232,236,255,.10);
+      --card: #1d1d20; --ok: #4ade80;
+    }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font: 15px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column;
+  }
+  header { padding: 14px 16px 12px; border-bottom: 1px solid var(--line); }
+  h1 { margin: 0 0 4px; font-size: 17px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  h1 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); flex: none; }
+  .sub { margin: 0; color: var(--dim); font-size: 12px; }
+  .sub b { color: var(--ink); font-weight: 600; }
+  .why { margin: 6px 0 0; color: var(--dim); font-size: 11px; word-break: break-all; }
+  .acts { display: flex; gap: 8px; margin-top: 10px; }
+  button {
+    font: inherit; font-size: 13px; border: 0; border-radius: 8px; padding: 8px 14px;
+    background: var(--ghost); color: var(--brand); cursor: pointer;
+  }
+  button.primary { background: var(--brand); color: var(--on-brand); }
+  main { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li {
+    padding: 12px 16px; border-bottom: 1px solid var(--line); cursor: pointer;
+    display: flex; flex-direction: column; gap: 3px;
+  }
+  li:active { background: var(--ghost); }
+  .t { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .m { color: var(--dim); font-size: 12px; display: flex; gap: 8px; align-items: center; }
+  .m .cwd { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .badge { color: var(--ok); font-size: 11px; flex: none; }
+  .empty { padding: 40px 24px; color: var(--dim); text-align: center; font-size: 13px; }
+  .empty p { margin: 0 0 8px; }
+  /* Conversation */
+  .back { padding: 10px 16px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; }
+  .back button { padding: 6px 10px; }
+  .back .ttl { font-size: 13px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chat { padding: 14px 14px 28px; display: flex; flex-direction: column; gap: 12px; }
+  .row { display: flex; }
+  .row.u { justify-content: flex-end; }
+  .bub { max-width: 86%; padding: 9px 12px; border-radius: 12px; white-space: pre-wrap; word-break: break-word; }
+  .row.u .bub { background: var(--brand); color: var(--on-brand); border-bottom-right-radius: 4px; }
+  .row.a .bub { background: var(--card); border-bottom-left-radius: 4px; }
+  .clip { align-self: center; color: var(--dim); font-size: 11px; }
+  footer { padding: 10px 16px; border-top: 1px solid var(--line); color: var(--dim); font-size: 11px; text-align: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="dot"></span><span id="head">连不上电脑</span></h1>
+  <p class="sub" id="sub">正在读取本地缓存…</p>
+  <p class="why" id="why"></p>
+  <div class="acts">
+    <button class="primary" id="retry">重试连接</button>
+    <button id="top">回到列表</button>
+  </div>
+</header>
+<main id="main"></main>
+<footer>内容为上次在线时的快照，仅供离线查看；电脑恢复后点「重试连接」。</footer>
+
+<script>window.__OFFLINE__ = /*__OFFLINE__*/null;</script>
+<script>
+(function () {
+  "use strict";
+  var info = window.__OFFLINE__ || { why: "", syncedAt: 0, now: Date.now(), snapshot: null };
+  var snap = info.snapshot;
+  var main = document.getElementById("main");
+  var head = document.getElementById("head");
+  var sub = document.getElementById("sub");
+  var why = document.getElementById("why");
+
+  function when(ms) {
+    if (!ms) return "从未同步";
+    var d = new Date(ms);
+    var p = function (n) { return (n < 10 ? "0" : "") + n; };
+    var sameDay = new Date().toDateString() === d.toDateString();
+    return (sameDay ? "" : d.getMonth() + 1 + "月" + d.getDate() + "日 ") + p(d.getHours()) + ":" + p(d.getMinutes());
+  }
+  function ago(ms) {
+    if (!ms) return "";
+    var s = Math.max(0, Math.round((info.now - ms) / 1000));
+    if (s < 60) return "刚刚";
+    if (s < 3600) return Math.round(s / 60) + " 分钟前";
+    if (s < 86400) return Math.round(s / 3600) + " 小时前";
+    return Math.round(s / 86400) + " 天前";
+  }
+  function base(p) {
+    if (!p) return "";
+    var parts = String(p).split(/[\\/]/).filter(Boolean);
+    return parts.length ? parts[parts.length - 1] : "";
+  }
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+
+  why.textContent = info.why || "";
+  why.style.display = info.why ? "" : "none";
+
+  if (!snap || !snap.sessions || !snap.sessions.length) {
+    head.textContent = "没有本地缓存";
+    sub.innerHTML = info.syncedAt
+      ? "上次同步 <b>" + when(info.syncedAt) + "</b>，但快照是空的。"
+      : "这台手机还没在联网状态下同步过。";
+    main.appendChild(
+      el("div", "empty", "连上电脑打开一次 DSH，手机就会把最近的会话存在本地；之后电脑关机或手机没网，这里仍能翻看。")
+    );
+    return;
+  }
+
+  var withBody = 0;
+  for (var i = 0; i < snap.sessions.length; i++) if (snap.sessions[i].messages && snap.sessions[i].messages.length) withBody++;
+  head.textContent = "离线可读";
+  sub.innerHTML =
+    "上次同步 <b>" + when(info.syncedAt) + "</b>（" + ago(info.syncedAt) + "）· " +
+    snap.sessions.length + " 个会话，其中 " + withBody + " 个有正文";
+
+  function list() {
+    main.textContent = "";
+    var ul = el("ul");
+    for (var i = 0; i < snap.sessions.length; i++) {
+      (function (s) {
+        var li = el("li");
+        li.appendChild(el("div", "t", s.title || s.id.replace(/^session-/, "").slice(0, 8)));
+        var m = el("div", "m");
+        m.appendChild(el("span", "cwd", base(s.cwd) || s.cwd || ""));
+        m.appendChild(el("span", null, when(s.updatedAt)));
+        if (s.messages && s.messages.length) m.appendChild(el("span", "badge", "有正文"));
+        li.appendChild(m);
+        li.addEventListener("click", function () { chat(s); });
+        ul.appendChild(li);
+      })(snap.sessions[i]);
+    }
+    main.appendChild(ul);
+    main.scrollTop = 0;
+  }
+
+  function chat(s) {
+    main.textContent = "";
+    var bar = el("div", "back");
+    var back = el("button", null, "返回");
+    back.addEventListener("click", list);
+    bar.appendChild(back);
+    bar.appendChild(el("div", "ttl", s.title || s.id));
+    main.appendChild(bar);
+
+    if (!s.messages || !s.messages.length) {
+      main.appendChild(el("div", "empty", "这个会话只缓存了标题，没有正文。\n下次联网时再打开一次 DSH 就会补上。"));
+      return;
+    }
+    var box = el("div", "chat");
+    if (s.turns > 0 && s.messages.length >= 40) {
+      box.appendChild(el("div", "clip", "（只保留最近的消息）"));
+    }
+    for (var i = 0; i < s.messages.length; i++) {
+      var m = s.messages[i];
+      var row = el("div", "row " + (m.role === "user" ? "u" : "a"));
+      row.appendChild(el("div", "bub", m.text));
+      box.appendChild(row);
+    }
+    main.appendChild(box);
+    main.scrollTop = 0;
+  }
+
+  document.getElementById("top").addEventListener("click", list);
+  document.getElementById("retry").addEventListener("click", function () {
+    // The App re-picks the upstream and reloads; a browser just reloads and gets this page again.
+    try {
+      if (window.AndroidBridge && window.AndroidBridge.offlineRetry) {
+        window.AndroidBridge.offlineRetry();
+        return;
+      }
+    } catch (e) { /* fall through */ }
+    location.reload();
+  });
+
+  list();
+})();
+</script>
+</body>
+</html>

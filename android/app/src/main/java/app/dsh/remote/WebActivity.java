@@ -70,6 +70,12 @@ public class WebActivity extends Activity {
   private static final int PICK_FILES = 41;
   /** Settling time after a network change: Android reports one flap as several events in a row. */
   private static final long RENEW_DELAY_MS = 1500;
+  /** How often the phone refreshes the copy of the conversations it keeps for offline reading. */
+  private static final long SYNC_EVERY_MS = 10 * 60 * 1000;
+  /** Wait this long after a page load before pulling the snapshot: the shell is still loading. */
+  private static final long SYNC_DELAY_MS = 3000;
+  /** While the offline page is up, how often to ask whether the PC has come back. */
+  private static final long OFFLINE_RETRY_MS = 20000;
 
   private Toolbar bar;
   private ProgressBar progress;
@@ -80,6 +86,11 @@ public class WebActivity extends Activity {
   private Tunnel tunnel;
   /** Serves the shell's unchanged build outputs from disk; see {@link AssetCache}. */
   private AssetCache cache;
+  /** True while what is on screen is the offline page the tunnel served, not the PC's own page. */
+  private boolean offline;
+  /** One snapshot fetch at a time, and not more often than {@link #SYNC_EVERY_MS}. */
+  private boolean syncing;
+  private long lastSyncAt;
   private ValueCallback<Uri[]> pendingUpload;
   private String lastUrl;
   private String target = "";
@@ -101,6 +112,89 @@ public class WebActivity extends Activity {
         @Override
         public void run() {
           if (!selecting) renewUpstream();
+        }
+      };
+
+  /**
+   * While the offline page is up, ask whether the PC has come back - and hand over to {@link #open}
+   * only once it has. Reloading on every attempt would throw away where the reader had scrolled to,
+   * which is the whole point of the page being readable.
+   */
+  private final Runnable probeAgainTask =
+      new Runnable() {
+        @Override
+        public void run() {
+          if (!offline || selecting || handler == null) return;
+          final String host = Prefs.host(WebActivity.this);
+          final int port = Prefs.port(WebActivity.this);
+          final String key = Prefs.key(WebActivity.this);
+          if (host.isEmpty()) return;
+          Thread t =
+              new Thread(
+                  new Runnable() {
+                    @Override
+                    public void run() {
+                      // choose(), not probe(): the PC may have come back on a different address.
+                      final String[] chosen = Upstream.choose(WebActivity.this, host, port, key);
+                      final String problem = Upstream.probe(chosen[0], Integer.parseInt(chosen[1]));
+                      runOnUiThread(
+                          new Runnable() {
+                            @Override
+                            public void run() {
+                              if (!offline) return;
+                              if (problem == null) {
+                                Log.i(TAG, "the PC answers again, leaving offline mode");
+                                open();
+                              } else {
+                                handler.postDelayed(probeAgainTask, OFFLINE_RETRY_MS);
+                              }
+                            }
+                          });
+                    }
+                  },
+                  "dsh-offline-probe");
+          t.setDaemon(true);
+          t.start();
+        }
+      };
+
+  /**
+   * Pulls a fresh offline snapshot once the page has settled; see {@link #syncSnapshot}. Kept as a
+   * field so {@link #onDestroy} can cancel a pending one.
+   */
+  private final Runnable syncTask =
+      new Runnable() {
+        @Override
+        public void run() {
+          final int port = tunnel == null ? 0 : tunnel.port();
+          if (port == 0) {
+            syncing = false;
+            return;
+          }
+          final String key = Prefs.key(WebActivity.this);
+          Thread t =
+              new Thread(
+                  new Runnable() {
+                    @Override
+                    public void run() {
+                      final boolean ok = Offline.sync(WebActivity.this, port, key);
+                      runOnUiThread(
+                          new Runnable() {
+                            @Override
+                            public void run() {
+                              syncing = false;
+                              // Set even on failure: a snapshot that could not be fetched is not
+                              // worth retrying on every page load, and the next one is ten minutes
+                              // away at most.
+                              lastSyncAt = System.currentTimeMillis();
+                              Log.i(TAG, ok ? "offline snapshot refreshed" : "offline snapshot unchanged");
+                            }
+                          });
+                    }
+                  },
+                  "dsh-offline-sync");
+          t.setDaemon(true);
+          t.start();
         }
       };
 
@@ -184,7 +278,11 @@ public class WebActivity extends Activity {
 
   @Override
   protected void onDestroy() {
-    if (handler != null) handler.removeCallbacks(renewTask);
+    if (handler != null) {
+      handler.removeCallbacks(renewTask);
+      handler.removeCallbacks(syncTask);
+      handler.removeCallbacks(probeAgainTask);
+    }
     if (networkCallback != null) {
       try {
         connectivity().unregisterNetworkCallback(networkCallback);
@@ -208,6 +306,10 @@ public class WebActivity extends Activity {
     super.onResume();
     if (Prefs.ready(this)) scheduleRenew();
     refreshChrome();
+    // Coming back to the foreground on a network that never changed produces no callback, so this
+    // is the only chance to refresh the copy of the conversations. The rate limit inside makes it
+    // free to call on every resume.
+    if (!offline) syncSnapshot();
   }
 
   private void stopTunnel() {
@@ -393,6 +495,8 @@ public class WebActivity extends Activity {
    */
   private void open() {
     stopTunnel();
+    // A fresh attempt supersedes whatever the offline watchdog had lined up.
+    if (handler != null) handler.removeCallbacks(probeAgainTask);
     final String host = Prefs.host(this);
     final int port = Prefs.port(this);
     final String key = Prefs.key(this);
@@ -429,13 +533,22 @@ public class WebActivity extends Activity {
     pick.start();
   }
 
+  /**
+   * The offline page's own 重试连接 button, by way of {@link AndroidBridge#offlineRetry}. The
+   * watchdog's pending probe is dropped first so the two cannot both start a selection.
+   */
+  void retryFromPage() {
+    if (handler != null) handler.removeCallbacks(probeAgainTask);
+    open();
+  }
+
   /** Bind the loopback port and load, against an upstream already chosen by {@link Upstream#choose}. */
   private void connect(final String host, final int port, String key) {
     selecting = false;
     target = host + ":" + port;
     currentUpstream = target;
     try {
-      tunnel = new Tunnel(host, port, LOCAL_PORT);
+      tunnel = new Tunnel(host, port, LOCAL_PORT, offlineFallback());
     } catch (IOException e) {
       showProblem(LOCAL_HOST + ":" + LOCAL_PORT, "本机端口起不来：" + e);
       return;
@@ -462,10 +575,24 @@ public class WebActivity extends Activity {
                     new Runnable() {
                       @Override
                       public void run() {
-                        if (problem == null) {
+                        // A dead upstream is no longer a dead end. The load goes ahead either way:
+                        // the tunnel answers the document itself out of the phone's own copy of the
+                        // conversations (see {@link Offline}), so what appears is a page, not the
+                        // "无法连接" panel. The socket error still travels, to be printed there.
+                        boolean wasOffline = offline;
+                        offline = problem != null;
+                        if (!offline || !wasOffline) {
                           web.loadUrl(lastUrl);
                         } else {
-                          showProblem(target, problem);
+                          // Still offline with the offline page already up: reloading it would
+                          // throw away where the reader had scrolled to, so only the chrome is
+                          // put back - the page below stays exactly as it is.
+                          setStatus(R.string.st_offline);
+                          progress.setVisibility(View.GONE);
+                        }
+                        if (offline) {
+                          handler.removeCallbacks(probeAgainTask);
+                          handler.postDelayed(probeAgainTask, OFFLINE_RETRY_MS);
                         }
                       }
                     });
@@ -474,6 +601,25 @@ public class WebActivity extends Activity {
             "dsh-probe");
     probe.setDaemon(true);
     probe.start();
+  }
+
+  /**
+   * What the tunnel serves when the PC cannot be reached at all. Built per request rather than
+   * once, so it always carries the newest snapshot and the newest reason.
+   */
+  private Tunnel.Fallback offlineFallback() {
+    return new Tunnel.Fallback() {
+      @Override
+      public String page(String reason) {
+        return Offline.page(WebActivity.this, reason);
+      }
+    };
+  }
+
+  /** The offline page's 重试连接 button, through {@link AndroidBridge#offlineRetry}. */
+  void retryNow() {
+    Log.i(TAG, "the offline page asked for a retry");
+    open();
   }
 
   /** A network change: re-pick once it has settled, and reload only if that changes the address. */
@@ -494,8 +640,9 @@ public class WebActivity extends Activity {
                       public void run() {
                         String id = chosen[0] + ":" + chosen[1];
                         // `failed` means the page is not up at all, so the same address is still
-                        // worth a retry: the network may simply have been away.
-                        if (failed || !id.equals(currentUpstream)) {
+                        // worth a retry: the network may simply have been away. `offline` is the
+                        // same story for a page that is up but is the local one.
+                        if (failed || offline || !id.equals(currentUpstream)) {
                           Log.i(TAG, "network changed: " + currentUpstream + " -> " + id);
                           open();
                         }
@@ -543,6 +690,19 @@ public class WebActivity extends Activity {
     if (handler == null) return;
     handler.removeCallbacks(renewTask);
     handler.postDelayed(renewTask, RENEW_DELAY_MS);
+  }
+
+  /**
+   * Keep the phone's copy of the conversations current, so the next time the PC cannot be reached
+   * there is something to read. Rate limited, and never more than one at a time.
+   */
+  private void syncSnapshot() {
+    if (syncing || tunnel == null || handler == null) return;
+    if (System.currentTimeMillis() - lastSyncAt < SYNC_EVERY_MS) return;
+    syncing = true;
+    // Not immediately: the page that just finished is still pulling its own bundles through the
+    // same tunnel, and a second body of a few hundred KB is not worth competing with it.
+    handler.postDelayed(syncTask, SYNC_DELAY_MS);
   }
 
   /** True for the hosts the local tunnel answers on: localhost, IPv6 loopback, and all of 127/8. */
@@ -739,8 +899,11 @@ public class WebActivity extends Activity {
       if (failed) return; // a late finish must not paper over the failure panel
       applySafeBottom(safeInsetPx);
       hideOverlay();
-      setStatus(R.string.st_connected);
+      setStatus(offline ? R.string.st_offline : R.string.st_connected);
       progress.setVisibility(View.GONE);
+      // The page that just finished is the PC's own, so the PC is up: a good moment to refresh the
+      // copy kept for the times it is not.
+      if (!offline) syncSnapshot();
     }
 
     @Override

@@ -15,6 +15,7 @@
     <string name="err_webview">系统 WebView</string>
     <string name="st_connecting">连接中…</string>
     <string name="st_connected">已连接</string>
+    <string name="st_offline">离线</string>
     <string name="st_failed">连不上</string>
     <string name="setup_addr_label">电脑地址</string>
     <string name="setup_key_label">访问密钥</string>

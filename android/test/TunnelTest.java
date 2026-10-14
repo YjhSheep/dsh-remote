@@ -49,12 +49,40 @@ public final class TunnelTest {
     Tunnel dead = new Tunnel("127.0.0.1", freePort(), 17810);
     dead.start();
     String err = request(dead.port(), "/", null).all;
-    ok += check("answers 502 when the upstream is dead", err.startsWith("HTTP/1.1 502"),
-        firstLine(err));
+    ok += check("answers 502 when the upstream is dead and there is no offline page",
+        err.startsWith("HTTP/1.1 502"), firstLine(err));
     dead.stop();
 
-    System.out.println(ok + "/6 checks passed");
-    if (ok != 6) System.exit(1);
+    // With an offline page installed the same dead upstream has to produce a readable page for a
+    // navigation - and still a plain failure for everything else, since a fetch handed HTML
+    // reports nonsense rather than an error.
+    Tunnel offline = new Tunnel("127.0.0.1", freePort(), 17820, new Tunnel.Fallback() {
+      @Override
+      public String page(String reason) {
+        return "<html><body>offline page: " + reason + "</body></html>";
+      }
+    });
+    offline.start();
+    String page = request(offline.port(), "/", null).all;
+    ok += check("serves the offline page for a document", page.startsWith("HTTP/1.1 200")
+        && page.contains("text/html") && page.contains("offline page:"),
+        firstLine(page));
+    String api = request(offline.port(), "/api/session/list", null).all;
+    ok += check("still fails an /api call instead of answering it with HTML",
+        api.startsWith("HTTP/1.1 503"), firstLine(api));
+    offline.stop();
+
+    ok += check("only the document counts as a document",
+        Tunnel.isDocument("GET / HTTP/1.1\r\n\r\n".getBytes(StandardCharsets.ISO_8859_1))
+            && Tunnel.isDocument("GET /?k=abc HTTP/1.1\r\n\r\n".getBytes(StandardCharsets.ISO_8859_1))
+            && !Tunnel.isDocument("GET /api/x HTTP/1.1\r\n\r\n".getBytes(StandardCharsets.ISO_8859_1))
+            && !Tunnel.isDocument("POST / HTTP/1.1\r\n\r\n".getBytes(StandardCharsets.ISO_8859_1))
+            && !Tunnel.isDocument("GET /assets/a.js HTTP/1.1\r\n\r\n"
+                .getBytes(StandardCharsets.ISO_8859_1)),
+        "GET / and /?k= yes; /api, POST, /assets no");
+
+    System.out.println(ok + "/9 checks passed");
+    if (ok != 9) System.exit(1);
   }
 
   private static String firstLine(String response) {

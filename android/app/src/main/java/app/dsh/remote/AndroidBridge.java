@@ -55,6 +55,24 @@ final class AndroidBridge {
         });
   }
 
+  /**
+   * The offline page's 重试连接 button. Going back through the Activity rather than reloading in
+   * the page matters: {@link WebActivity#open} re-picks the upstream address first, which is what
+   * actually finds the PC again after the phone has moved between networks.
+   */
+  @JavascriptInterface
+  public void offlineRetry() {
+    if (!(activity instanceof WebActivity)) return;
+    final WebActivity web = (WebActivity) activity;
+    activity.runOnUiThread(
+        new Runnable() {
+          @Override
+          public void run() {
+            web.retryFromPage();
+          }
+        });
+  }
+
   private void show(String title, String body) {
     NotificationManager nm =
         (NotificationManager) activity.getSystemService(Activity.NOTIFICATION_SERVICE);

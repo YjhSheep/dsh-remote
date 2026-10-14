@@ -24,6 +24,7 @@ const os = require("os");
 const dgram = require("dgram");
 const path = require("path");
 const crypto = require("crypto");
+const zlib = require("zlib");
 
 const ROOT = path.join(__dirname, "..");
 const KEY_FILE = path.join(__dirname, ".bridge-key");
@@ -214,6 +215,182 @@ function injectHtml(html) {
   return /<\/body>/i.test(html) ? html.replace(/<\/body>/i, tags + "</body>") : html + tags;
 }
 
+// --- offline snapshot -------------------------------------------------------
+// What the App keeps on the phone so a PC that is switched off — or a phone that has no
+// network at all — still shows the conversations instead of "无法连接". Built from the session
+// logs DSH writes anyway (DSH_HOME/sessions/<slug>/<session>/session.v4.jsonl.zstd), so it needs
+// no /api call and no running GUI: the records carry the title, the working directory and every
+// message. The App pulls this while it is online and replays it from disk when it is not.
+//
+// One log is one zstd frame per turn, which is why the whole file has to be walked frame by frame
+// (zstdDecompressSync returns only the first) — tools/session-text.cjs does the same thing.
+const SESSIONS_DIR = path.join(DSH_HOME, "sessions");
+/** A phone asks for this on every page load; the logs behind it are 30 MB of decompression. */
+const SNAPSHOT_TTL_MS = 60 * 1000;
+/** Sessions listed, and of those how many also carry their messages. */
+const SNAPSHOT_LIST = 40;
+const SNAPSHOT_BODIES = 12;
+/** Newest messages kept per transcript, and the most characters kept of each. */
+const SNAPSHOT_MESSAGES = 40;
+const SNAPSHOT_TEXT = 4000;
+/** Over this the oldest transcripts lose their messages (the list itself always survives). */
+const SNAPSHOT_MAX_BYTES = 2 * 1024 * 1024;
+let snapshot = { at: 0, body: null };
+
+const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
+
+/** Every record of one session log, in order. Unreadable frames and torn lines are skipped. */
+function readLog(file) {
+  const buf = fs.readFileSync(file);
+  const offsets = [];
+  for (let i = buf.indexOf(ZSTD_MAGIC); i >= 0; i = buf.indexOf(ZSTD_MAGIC, i + 4)) offsets.push(i);
+  offsets.push(buf.length);
+  let text = "";
+  for (let i = 0; i < offsets.length - 1; i++) {
+    try {
+      text += zlib.zstdDecompressSync(buf.subarray(offsets[i], offsets[i + 1])).toString("utf8");
+    } catch (e) {
+      // A false magic inside a compressed payload: the frame boundary is the next real one.
+    }
+  }
+  const out = [];
+  for (const line of text.split("\n")) {
+    if (!line) continue;
+    try {
+      out.push(JSON.parse(line));
+    } catch (e) {
+      // A torn tail from a session that is being written right now.
+    }
+  }
+  return out;
+}
+
+/** The newest session logs on disk, newest first. */
+function sessionLogs() {
+  const out = [];
+  let slugs;
+  try {
+    slugs = fs.readdirSync(SESSIONS_DIR);
+  } catch (e) {
+    return out;
+  }
+  for (const slug of slugs) {
+    let entries;
+    try {
+      entries = fs.readdirSync(path.join(SESSIONS_DIR, slug));
+    } catch (e) {
+      continue;
+    }
+    for (const name of entries) {
+      const file = path.join(SESSIONS_DIR, slug, name, "session.v4.jsonl.zstd");
+      let st;
+      try {
+        st = fs.statSync(file);
+      } catch (e) {
+        continue;
+      }
+      if (st.isFile()) out.push({ file, mtime: st.mtimeMs });
+    }
+  }
+  out.sort((a, b) => b.mtime - a.mtime);
+  return out;
+}
+
+/** The prose of a message body; reasoning and tool calls are dropped, they are not readable. */
+function prose(parts) {
+  let text = "";
+  for (const p of parts ?? []) {
+    if (p && p.type === "text" && p.text) text += (text ? "\n\n" : "") + p.text;
+  }
+  return text;
+}
+
+function clip(text) {
+  return text.length > SNAPSHOT_TEXT ? text.slice(0, SNAPSHOT_TEXT) + "…" : text;
+}
+
+function buildSnapshot() {
+  const logs = sessionLogs().slice(0, SNAPSHOT_LIST);
+  const sessions = [];
+  for (let i = 0; i < logs.length; i++) {
+    let records;
+    try {
+      records = readLog(logs[i].file);
+    } catch (e) {
+      console.log(`snapshot: cannot read ${logs[i].file}: ${e.message}`);
+      continue;
+    }
+    let id = path.basename(path.dirname(logs[i].file));
+    let cwd = "";
+    let title = "";
+    let turns = 0;
+    const messages = [];
+    for (const r of records) {
+      const d = r.data ?? {};
+      if (r.type === "session") {
+        // The opening record is the one that is not wrapped in `data`.
+        id = r.id ?? d.id ?? id;
+        cwd = r.cwd ?? d.cwd ?? cwd;
+      } else if (r.type === "session/title") {
+        if (d.title) title = d.title;
+      } else if (r.type === "user/message") {
+        // Only what the human typed: the same record type also carries injected runtime
+        // context, the skill catalog and approval answers.
+        if (d.source?.kind !== "user") continue;
+        turns++;
+        const text = prose(d.content);
+        if (text) messages.push({ role: "user", text: clip(text), time: r.time ?? 0 });
+      } else if (r.type === "assistant/message") {
+        const text = prose(d.message?.content);
+        if (!text) continue;
+        // One answer arrives as several records (one per step); they read as one reply.
+        const last = messages[messages.length - 1];
+        if (last && last.role === "assistant") last.text = clip(last.text + "\n\n" + text);
+        else messages.push({ role: "assistant", text: clip(text), time: r.time ?? 0 });
+      }
+    }
+    sessions.push({
+      id,
+      title,
+      cwd,
+      updatedAt: logs[i].mtime,
+      turns,
+      // Only the newest few carry their messages; the rest are there to be listed.
+      messages: i < SNAPSHOT_BODIES ? messages.slice(-SNAPSHOT_MESSAGES) : [],
+    });
+  }
+  // The budget is spent from the newest session backwards: a phone that cannot reach the PC is
+  // far more likely to want yesterday's conversation than one from last month.
+  let body = JSON.stringify({ v: 1, generatedAt: Date.now(), host: os.hostname(), sessions });
+  while (body.length > SNAPSHOT_MAX_BYTES) {
+    const victim = sessions.filter((s) => s.messages.length).pop();
+    if (!victim) break;
+    victim.messages = [];
+    body = JSON.stringify({ v: 1, generatedAt: Date.now(), host: os.hostname(), sessions });
+  }
+  return body;
+}
+
+function serveSnapshot(res) {
+  const now = Date.now();
+  if (!snapshot.body || now - snapshot.at > SNAPSHOT_TTL_MS) {
+    let body;
+    try {
+      body = buildSnapshot();
+    } catch (e) {
+      console.log(`snapshot: ${e.stack ?? e.message}`);
+      body = JSON.stringify({ v: 1, generatedAt: now, host: os.hostname(), sessions: [], error: String(e.message) });
+    }
+    snapshot = { at: now, body };
+    console.log(`snapshot: ${body.length} bytes -> /__bridge/offline/snapshot.json`);
+  }
+  res.writeHead(200, {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+  });
+  res.end(snapshot.body);
+}
+
 // One line per request. A phone that shows an error page cannot say whether its request ever
 // reached us: tools/bridge.log only records startup and probe events, and /api traffic leaves no
 // trace at all. The byte count we actually wrote back is what separates "never arrived" from
@@ -269,6 +446,9 @@ const server = http.createServer((req, res) => {
     // Live LAN address list for the App: it asks through the tunnel (a fixed address that works
     // from any network), then tries each candidate directly and keeps the first that answers.
     if (u.pathname === "/__bridge/lan.json") return serveLanJson(res);
+    // What the App keeps on the phone for the times this PC cannot be reached; see the
+    // offline snapshot section above.
+    if (u.pathname === "/__bridge/offline/snapshot.json") return serveSnapshot(res);
     // Delivery path for the phone app: open this on the phone and Android installs it
     // straight from the PC. 404s until android/gradle-build.ps1 has produced the APK.
     if (u.pathname === "/__bridge/app.apk")
@@ -486,9 +666,18 @@ async function runSelfTest(lanHost) {
       "keyboard.js served",
       async () => (await request(lanHost, "/__bridge/keyboard.js", { cookie: GATE_COOKIE })).status,
     ],
+    [
+      "offline snapshot",
+      async () => {
+        const r = await request(lanHost, "/__bridge/offline/snapshot.json", { cookie: GATE_COOKIE });
+        if (r.status !== 200) return r.status;
+        const s = JSON.parse(r.body).sessions ?? [];
+        return `${r.status} sessions=${s.length} withMessages=${s.filter((x) => x.messages.length).length}`;
+      },
+    ],
   ];
   for (const [label, fn] of checks) console.log(`  selftest ${label}: ${await fn()}`);
   console.log(
-    "  expect 401, 401, 303, 200, 404(=fence+auth passed, no such route), 200 probe-script=true kb-script=true, 200, 200",
+    "  expect 401, 401, 303, 200, 404(=fence+auth passed, no such route), 200 probe-script=true kb-script=true, 200, 200, 200 sessions>0",
   );
 }
