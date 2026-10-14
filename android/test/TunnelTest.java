@@ -11,13 +11,14 @@ import java.nio.charset.StandardCharsets;
  * End-to-end check for {@link Tunnel}, runnable on the PC because Tunnel uses nothing but the JDK.
  *
  * <pre>
- * javac -encoding UTF-8 -d ..\build\tunneltest app\java\app\dsh\remote\Tunnel.java test\TunnelTest.java
+ * javac -encoding UTF-8 -d ..\build\tunneltest app\src\main\java\app\dsh\remote\Tunnel.java test\TunnelTest.java
  * java -cp ..\build\tunneltest app.dsh.remote.TunnelTest 3080 &lt;bridge-key&gt;
  * </pre>
  *
  * Asserts: the port is the requested one (with fallback when taken), the gate handshake over the
  * tunnel hands out the bridge cookie, the follow-up request carrying that cookie returns the app
- * shell, and a dead upstream yields the 502 page.
+ * shell, a dead upstream yields the 502 page without an offline page and the offline page with one,
+ * and the App's own /__offline route is answered locally either way.
  */
 public final class TunnelTest {
   public static void main(String[] args) throws Exception {
@@ -44,6 +45,21 @@ public final class TunnelTest {
     ok += check("carries the document with the gate cookie", response.startsWith("HTTP/1.1 200")
         && response.contains("DeepSeek Harness"), firstLine(response));
     ok += check("document body is whole", response.length() > 5000, response.length() + " bytes");
+
+    // The App loads this route itself once a navigation has failed with the upstream accepted but
+    // silent - the bridge being down behind a live frp tunnel. It must never reach the bridge, so
+    // it is answered locally even here, where the upstream is perfectly healthy.
+    Tunnel live = new Tunnel("127.0.0.1", upstreamPort, 17802, new Tunnel.Fallback() {
+      @Override
+      public String page(String reason) {
+        return "<html><body>offline " + reason + "</body></html>";
+      }
+    });
+    live.start();
+    String forced = request(live.port(), "/__offline", null).all;
+    ok += check("answers /__offline locally while the bridge is up",
+        forced.startsWith("HTTP/1.1 200") && forced.contains("offline "), firstLine(forced));
+    live.stop();
     t.stop();
 
     Tunnel dead = new Tunnel("127.0.0.1", freePort(), 17810);
@@ -70,6 +86,11 @@ public final class TunnelTest {
     String api = request(offline.port(), "/api/session/list", null).all;
     ok += check("still fails an /api call instead of answering it with HTML",
         api.startsWith("HTTP/1.1 503"), firstLine(api));
+    // And the route itself carries the reason the App put on it, so the page can name the failure.
+    String why = request(offline.port(), "/__offline?why=net%3A%3AERR_EMPTY_RESPONSE", null).all;
+    ok += check("passes the App's reason through to the page",
+        why.startsWith("HTTP/1.1 200") && why.contains("offline page: net::ERR_EMPTY_RESPONSE"),
+        firstLine(why));
     offline.stop();
 
     ok += check("only the document counts as a document",
@@ -81,8 +102,8 @@ public final class TunnelTest {
                 .getBytes(StandardCharsets.ISO_8859_1)),
         "GET / and /?k= yes; /api, POST, /assets no");
 
-    System.out.println(ok + "/9 checks passed");
-    if (ok != 9) System.exit(1);
+    System.out.println(ok + "/11 checks passed");
+    if (ok != 11) System.exit(1);
   }
 
   private static String firstLine(String response) {

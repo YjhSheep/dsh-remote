@@ -14,18 +14,22 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 
 /**
- * The copy of the conversations the phone keeps so a PC that is off - or a phone with no network
- * at all - still shows something readable instead of "无法连接".
+ * What this phone keeps so a PC that is off - or a phone with no network at all - still shows the
+ * app instead of "无法连接".
  *
- * <p>Two halves. {@link #sync} pulls the bridge's snapshot through the tunnel while the PC is up
- * and writes it to the app's own files directory (not the cache directory: "clear cache" must not
- * throw away the only copy of a conversation). {@link #page} renders it into the page the tunnel
- * serves when the PC cannot be reached at all - the snapshot is inlined, so the offline page needs
- * no further request and therefore nothing else can fail behind it.
+ * <p>Two copies, both written while the PC is up and read while it is away, both in the app's own
+ * files directory rather than the cache directory ("clear cache" must not throw away the only copy
+ * of a conversation):
  *
- * <p>The snapshot is the PC's own session logs, built by {@code tools/dsh-lan-bridge.cjs}; nothing
- * here interprets it beyond checking that it parses as JSON, and it is escaped for its one trip
- * through a {@code <script>} block.
+ * <ul>
+ *   <li>{@link #shell} - the PC's own document, byte for byte. This is the one that matters: the
+ *       App puts it back on screen and everything it then asks for (the bundles under /assets/ and
+ *       /plugins/) is already in {@link AssetCache}, so the offline app <em>is</em> the app, and the
+ *       only tell is the toolbar saying 未连接.
+ *   <li>{@link #file} - a snapshot of the conversations, built by {@code tools/dsh-lan-bridge.cjs}
+ *       from the PC's own session logs. Only used when this phone has never had the shell, where
+ *       {@link #page} is the last thing left that is worth showing.
+ * </ul>
  */
 final class Offline {
   private static final String TAG = "dsh-remote";
@@ -35,6 +39,8 @@ final class Offline {
   static final String MARKER = "/*__OFFLINE__*/null";
   /** A snapshot bigger than this is not one we wrote, so it is not worth keeping. */
   private static final long MAX_BYTES = 4L * 1024 * 1024;
+  /** The shell is the PC's own document; this is only a guard against keeping something absurd. */
+  private static final long MAX_SHELL_BYTES = 4L * 1024 * 1024;
 
   private static volatile String template;
 
@@ -45,6 +51,21 @@ final class Offline {
     return new File(new File(c.getFilesDir(), "offline"), "snapshot.json");
   }
 
+  /**
+   * Where the real page is kept. This is what the App puts back on screen while the PC is away, so
+   * the app looks exactly as it always does instead of wearing a page of our own making; the only
+   * difference is the toolbar, which says 未连接. See
+   * {@code WebActivity.Client.shouldInterceptRequest}.
+   */
+  static File shell(Context c) {
+    return new File(new File(c.getFilesDir(), "offline"), "shell.html");
+  }
+
+  /** The stored shell verbatim, or null when this phone has never had the page. */
+  static String shellBody(Context c) {
+    return read(shell(c));
+  }
+
   /** When the copy on disk was written, or 0 if there is none. */
   static long syncedAt(Context c) {
     File f = file(c);
@@ -53,7 +74,10 @@ final class Offline {
 
   /** The stored snapshot verbatim, or null when there is nothing usable on disk. */
   static String snapshot(Context c) {
-    File f = file(c);
+    return read(file(c));
+  }
+
+  private static String read(File f) {
     if (!f.isFile() || f.length() == 0) return null;
     try {
       byte[] bytes = new byte[(int) f.length()];
@@ -67,35 +91,41 @@ final class Offline {
       in.close();
       return new String(bytes, 0, off, StandardCharsets.UTF_8);
     } catch (IOException e) {
-      Log.w(TAG, "cannot read the offline snapshot: " + e);
+      Log.w(TAG, "cannot read " + f.getName() + ": " + e);
       return null;
     }
   }
 
   /**
-   * Fetch a fresh snapshot through the App's own tunnel and keep it.
+   * Fetch the two copies this phone keeps and write them, each atomically.
    *
-   * <p>Through the tunnel rather than straight at the PC: the tunnel is already pointed at
-   * whichever address answered, and when the PC is gone its fallback answers this route with a
-   * plain 503 - which is a cheap way to find out there is nothing to fetch.
+   * <p>Both go through the App's own tunnel rather than straight at the PC: the tunnel is already
+   * pointed at whichever address answered, and when the PC is gone its fallback answers these with
+   * a plain 503 - which is a cheap way to find out there is nothing to fetch.
    *
-   * @return true when a new copy landed.
+   * @return true when at least one of them landed.
    */
   static boolean sync(Context c, int tunnelPort, String key) {
+    String base = "http://localhost:" + tunnelPort;
+    // The shell first: it is what makes an offline app look like the app.
+    boolean shell = get(base + "/", key, shell(c), 200, MAX_SHELL_BYTES);
+    boolean snap = get(base + ROUTE, key, file(c), 2, MAX_BYTES);
+    return shell || snap;
+  }
+
+  private static boolean get(String url, String key, File target, long min, long max) {
     HttpURLConnection conn = null;
     File part = null;
     try {
-      conn =
-          (HttpURLConnection)
-              new URL("http://localhost:" + tunnelPort + ROUTE).openConnection();
+      conn = (HttpURLConnection) new URL(url).openConnection();
       conn.setConnectTimeout(4000);
       conn.setReadTimeout(30000);
       // The bridge's own gate, the same cookie Upstream.lanCandidates sends.
       conn.setRequestProperty("Cookie", "dsh-bridge=" + key);
       if (conn.getResponseCode() != 200) return false;
-      File dir = file(c).getParentFile();
+      File dir = target.getParentFile();
       dir.mkdirs();
-      part = File.createTempFile("snapshot", ".part", dir);
+      part = File.createTempFile(target.getName(), ".part", dir);
       InputStream in = conn.getInputStream();
       FileOutputStream out = new FileOutputStream(part);
       long total = 0;
@@ -107,13 +137,13 @@ final class Offline {
       }
       out.close();
       in.close();
-      if (total < 2 || total > MAX_BYTES) return false;
+      if (total < min || total > max) return false;
       // rename(2) replaces an existing file, so a failed sync cannot destroy the old copy.
-      if (!part.renameTo(file(c))) return false;
+      if (!part.renameTo(target)) return false;
       part = null;
       return true;
     } catch (IOException e) {
-      Log.i(TAG, "offline snapshot not fetched: " + e);
+      Log.i(TAG, "offline copy not fetched (" + target.getName() + "): " + e);
       return false;
     } finally {
       if (conn != null) conn.disconnect();

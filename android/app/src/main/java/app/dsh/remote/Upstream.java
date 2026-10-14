@@ -5,11 +5,14 @@ import android.util.Log;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -22,13 +25,15 @@ import org.json.JSONObject;
  * <p>One copy of the discovery rules for both the native screens and the WebView shell: the
  * configured address is the beacon, the bridge answers {@code /__bridge/lan.json} with the PC's
  * live LAN addresses, the last winner is cached in prefs (that covers the beacon being briefly
- * unreachable right after boot), and the first candidate a plain TCP connect reaches wins. The
- * beacon is what DSH calls last, so a same-LAN phone stops paying for a public round trip on every
- * request.
+ * unreachable right after boot), and the first candidate that answers HTTP wins. The beacon is what
+ * DSH calls last, so a same-LAN phone stops paying for a public round trip on every request.
  */
 public final class Upstream {
 
   private static final String TAG = "dsh-remote";
+
+  /** The bridge's own "where am I" route: the cheapest request that proves the bridge is running. */
+  private static final String LAN_JSON = "/__bridge/lan.json";
 
   /** A candidate probe wants a much shorter patience than the full pre-load check. */
   public static final int PROBE_TIMEOUT_MS = 700;
@@ -126,7 +131,7 @@ public final class Upstream {
     try {
       c =
           (HttpURLConnection)
-              new URL("http://" + host + ":" + port + "/__bridge/lan.json").openConnection();
+              new URL("http://" + host + ":" + port + LAN_JSON).openConnection();
       c.setConnectTimeout(BEACON_TIMEOUT_MS);
       c.setReadTimeout(BEACON_TIMEOUT_MS);
       c.setRequestProperty("Cookie", "dsh-bridge=" + key);
@@ -157,16 +162,42 @@ public final class Upstream {
     return out;
   }
 
-  /** @return null when the bridge accepts a connection, otherwise what went wrong. */
+  /** @return null when the bridge answers, otherwise what went wrong. */
   public static String probe(String host, int port) {
     return probe(host, port, 4000);
   }
 
-  /** The same check with the caller's own patience - a candidate probe wants a much shorter one. */
+  /**
+   * The same check with the caller's own patience - a candidate probe wants a much shorter one.
+   *
+   * <p>Asks for a page and waits for the status line, because accepting a connection is not proof
+   * that the PC is behind it. When the PC's frp client is gone but the relay is still up, the relay
+   * completes the handshake and then drops the connection; a connect-only probe calls that
+   * reachable, the App loads the page through a tunnel with nothing on the far end, and the WebView
+   * reports net::ERR_EMPTY_RESPONSE instead of the offline page. The status code itself is not
+   * inspected: the bridge's own gate answering 401 proves the bridge is there just as well as 200.
+   *
+   * @return null when an HTTP status line came back, otherwise what went wrong.
+   */
   public static String probe(String host, int port, int timeoutMs) {
     Socket s = new Socket();
     try {
       s.connect(new InetSocketAddress(host, port), timeoutMs);
+      s.setSoTimeout(timeoutMs);
+      OutputStream out = s.getOutputStream();
+      out.write(
+          ("GET " + LAN_JSON + " HTTP/1.0\r\nHost: " + host + ":" + port + "\r\n\r\n")
+              .getBytes(StandardCharsets.US_ASCII));
+      out.flush();
+      InputStream in = s.getInputStream();
+      StringBuilder line = new StringBuilder();
+      int b;
+      while ((b = in.read()) >= 0 && b != '\n') {
+        if (b != '\r') line.append((char) b);
+        if (line.length() > 64) break;
+      }
+      if (line.length() == 0) return "no answer from " + host + ":" + port;
+      if (!line.toString().startsWith("HTTP/")) return "not HTTP: " + line;
       return null;
     } catch (IOException e) {
       return e.toString();

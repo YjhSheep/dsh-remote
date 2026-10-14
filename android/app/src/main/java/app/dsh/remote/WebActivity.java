@@ -42,7 +42,11 @@ import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * A thin WebView around the desktop DSH, reached over a loopback tunnel (see {@link Tunnel}).
@@ -86,13 +90,20 @@ public class WebActivity extends Activity {
   private Tunnel tunnel;
   /** Serves the shell's unchanged build outputs from disk; see {@link AssetCache}. */
   private AssetCache cache;
-  /** True while what is on screen is the offline page the tunnel served, not the PC's own page. */
-  private boolean offline;
+  /**
+   * True while what is on screen came off this phone rather than the PC. Written from the UI thread
+   * when the reachability probe fails, and from the tunnel's own thread whenever it has to fall back
+   * (see {@link #offlineFallback}), because a probe can be answered by a socket that is already on
+   * its way out - the page that then arrives is still a local one, and the bar must say so.
+   */
+  private volatile boolean offline;
   /** One snapshot fetch at a time, and not more often than {@link #SYNC_EVERY_MS}. */
   private boolean syncing;
   private long lastSyncAt;
   private ValueCallback<Uri[]> pendingUpload;
   private String lastUrl;
+  /** {@link Tunnel#OFFLINE_ROUTE} on this run's loopback port; null until a tunnel exists. */
+  private String offlineUrl;
   private String target = "";
   private boolean failed;
   /** Gesture-bar height in device px, and what the page has been told to leave room for. */
@@ -317,6 +328,7 @@ public class WebActivity extends Activity {
       tunnel.stop();
       tunnel = null;
     }
+    offlineUrl = null;
   }
 
   /**
@@ -472,6 +484,15 @@ public class WebActivity extends Activity {
     bar.setSubtitle(target.isEmpty() ? getString(resId) : getString(resId) + " · " + target);
   }
 
+  /**
+   * The PC is away. The address is left out on purpose: the page on screen came off this phone, so
+   * naming an upstream that is not answering would only mislead. This one line is the whole tell
+   * that the app is not live - everything else looks exactly as it does online.
+   */
+  private void setOfflineStatus() {
+    bar.setSubtitle(R.string.st_offline);
+  }
+
   /** WebView out of the way, one explaining panel in - used for every failure and for first run. */
   private void showOverlay(int titleRes, String reason) {
     failed = true;
@@ -558,6 +579,7 @@ public class WebActivity extends Activity {
     // (document, /api, SSE, WS) is already inside the gate.
     lastUrl =
         "http://" + LOCAL_HOST + ":" + tunnel.port() + "/" + (key.isEmpty() ? "" : "?k=" + Uri.encode(key));
+    offlineUrl = "http://" + LOCAL_HOST + ":" + tunnel.port() + Tunnel.OFFLINE_ROUTE;
     Log.i(TAG, "load " + lastUrl + " -> " + target);
     setStatus(R.string.st_connecting);
     hideOverlay();
@@ -587,7 +609,7 @@ public class WebActivity extends Activity {
                           // Still offline with the offline page already up: reloading it would
                           // throw away where the reader had scrolled to, so only the chrome is
                           // put back - the page below stays exactly as it is.
-                          setStatus(R.string.st_offline);
+                          setOfflineStatus();
                           progress.setVisibility(View.GONE);
                         }
                         if (offline) {
@@ -605,13 +627,20 @@ public class WebActivity extends Activity {
 
   /**
    * What the tunnel serves when the PC cannot be reached at all. Built per request rather than
-   * once, so it always carries the newest snapshot and the newest reason.
+   * once, so it always carries the newest copy and the newest reason. The real page first, so a
+   * navigation that reaches the tunnel still lands on the app itself; the snapshot page only for a
+   * phone that has never had the shell.
    */
   private Tunnel.Fallback offlineFallback() {
     return new Tunnel.Fallback() {
       @Override
       public String page(String reason) {
-        return Offline.page(WebActivity.this, reason);
+        // Reaching this at all means the PC did not answer, whatever the last probe said. Trust it
+        // over the probe: the page about to be shown is a local one, and onPageFinished reads this
+        // flag to decide whether the bar says 已连接 or 未连接.
+        offline = true;
+        String shell = Offline.shellBody(WebActivity.this);
+        return shell != null ? shell : Offline.page(WebActivity.this, reason);
       }
     };
   }
@@ -693,8 +722,9 @@ public class WebActivity extends Activity {
   }
 
   /**
-   * Keep the phone's copy of the conversations current, so the next time the PC cannot be reached
-   * there is something to read. Rate limited, and never more than one at a time.
+   * Keep the phone's copies current - the page itself and the conversations behind it - so the next
+   * time the PC cannot be reached the app still looks like the app. Rate limited, and never more
+   * than one at a time.
    */
   private void syncSnapshot() {
     if (syncing || tunnel == null || handler == null) return;
@@ -709,6 +739,11 @@ public class WebActivity extends Activity {
   private static boolean isLoopbackHost(String host) {
     return host != null
         && (host.equals("localhost") || host.equals("::1") || host.matches("127(\\.\\d{1,3}){3}"));
+  }
+
+  /** The paths that are the app itself rather than one of its resources. */
+  private static boolean isDocumentPath(String path) {
+    return path.isEmpty() || path.equals("/") || path.equals("/index.html");
   }
 
   /** Says which address failed and why - the socket error names the phone's own address too. */
@@ -865,12 +900,33 @@ public class WebActivity extends Activity {
       if (!isLoopbackHost(u.getHost())) return null;
       String path = u.getEncodedPath();
       if (path == null) return null;
+      // While the PC is away the real page comes off this phone - the same document the PC served,
+      // cached on the last successful load. The app then looks exactly as it always does and the
+      // toolbar is the only thing that says 未连接. Everything the page asks for next (the bundles
+      // under /assets/ and /plugins/) is in AssetCache already, so nothing else needs the network.
+      if (offline && isDocumentPath(path)) {
+        String shell = Offline.shellBody(WebActivity.this);
+        if (shell != null) return local(shell);
+      }
       long maxAge = AssetCache.maxAge(path);
       if (maxAge == 0) return null;
       // The query carries the content hash or the plugin rev, so it is part of the identity; for the
       // /plugins/ combos it starts with a second '?' and has to be put back verbatim.
       String query = u.getEncodedQuery();
       return cache.serve(u.toString(), query == null ? path : path + "?" + query, maxAge);
+    }
+
+    /** A document held on this phone, answered without the network being touched at all. */
+    private WebResourceResponse local(String html) {
+      Map<String, String> headers = new HashMap<>();
+      headers.put("Content-Type", "text/html; charset=utf-8");
+      return new WebResourceResponse(
+          "text/html",
+          "utf-8",
+          200,
+          "OK",
+          headers,
+          new ByteArrayInputStream(html.getBytes(StandardCharsets.UTF_8)));
     }
 
     @Override
@@ -899,7 +955,11 @@ public class WebActivity extends Activity {
       if (failed) return; // a late finish must not paper over the failure panel
       applySafeBottom(safeInsetPx);
       hideOverlay();
-      setStatus(offline ? R.string.st_offline : R.string.st_connected);
+      if (offline) {
+        setOfflineStatus();
+      } else {
+        setStatus(R.string.st_connected);
+      }
       progress.setVisibility(View.GONE);
       // The page that just finished is the PC's own, so the PC is up: a good moment to refresh the
       // copy kept for the times it is not.
@@ -910,10 +970,35 @@ public class WebActivity extends Activity {
     public void onReceivedError(WebView view, WebResourceRequest req, WebResourceError err) {
       if (!req.isForMainFrame()) return;
       String reason = String.valueOf(err.getDescription());
-      Log.w(TAG, "load failed: " + reason + " @ " + req.getUrl());
+      String url = String.valueOf(req.getUrl());
+      Log.w(TAG, "load failed: " + reason + " @ " + url);
+      // Dialling the upstream is not proof that anything answers behind it: a tunnel whose bridge is
+      // not running accepts the connection and then drops it, so the tunnel's own fallback never
+      // runs and the WebView reports a bare net::ERR_EMPTY_RESPONSE. That is the one failure the App
+      // has to catch itself - and it is the common one, since the frp tunnel to a switched-off PC
+      // accepts connections just as happily. Mark the app offline and load the same URL again: the
+      // page then comes off this phone (see shouldInterceptRequest) and the app looks the way it
+      // always does. The "无法连接" panel stays for the case where even that is not available.
+      if (offlineUrl != null
+          && !url.contains(Tunnel.OFFLINE_ROUTE)
+          && isLoopbackHost(req.getUrl().getHost())) {
+        offline = true;
+        setOfflineStatus();
+        progress.setVisibility(View.GONE);
+        handler.removeCallbacks(probeAgainTask);
+        handler.postDelayed(probeAgainTask, OFFLINE_RETRY_MS);
+        if (Offline.shellBody(WebActivity.this) != null) {
+          web.loadUrl(lastUrl);
+        } else {
+          // Never had the page on this phone: the snapshot page is the only thing left worth
+          // showing, and it is inlined, so nothing else can fail behind it.
+          web.loadUrl(offlineUrl + "?why=" + Uri.encode(reason));
+        }
+        return;
+      }
       // On the screen, not just in logcat: this is the only evidence available when the phone
       // cannot be attached to a PC.
-      showProblem(String.valueOf(req.getUrl()), reason);
+      showProblem(url, reason);
     }
   }
 

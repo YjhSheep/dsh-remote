@@ -27,6 +27,11 @@ import java.nio.charset.StandardCharsets;
  * for everything else, instead of handing HTML to an API call.
  */
 final class Tunnel {
+  /**
+   * Where the App asks for the offline page on purpose. Answered locally, without ever dialling the
+   * upstream - see {@link #isOfflineRoute}.
+   */
+  static final String OFFLINE_ROUTE = "/__offline";
   /** A request head is a request line plus headers; this is far more than any client sends. */
   private static final int MAX_HEAD = 16384;
   /** How long a client gets to send its request line before the upstream is dialled regardless. */
@@ -136,6 +141,20 @@ final class Tunnel {
       return;
     }
     byte[] head = readHead(client, fromClient);
+    if (fallback != null && isOfflineRoute(head)) {
+      // Asked for on purpose. This exists because dialling the upstream is not proof that anything
+      // is listening behind it: a tunnel that is up but whose bridge is not accepts the connection
+      // and then drops it, so the fallback in answer() never runs and the WebView reports a bare
+      // net::ERR_EMPTY_RESPONSE. The App reacts to that by loading this route.
+      respond(
+          client,
+          "200 OK",
+          "text/html; charset=utf-8",
+          fallback.page(offlineReason(head)).getBytes(StandardCharsets.UTF_8));
+      close(up);
+      close(client);
+      return;
+    }
     try {
       up.connect(new InetSocketAddress(host, port), 8000);
     } catch (IOException e) {
@@ -215,10 +234,43 @@ final class Tunnel {
   static boolean isDocument(byte[] head) {
     String[] parts = firstLine(head).split(" ");
     if (parts.length < 2 || !"GET".equals(parts[0])) return false;
-    String target = parts[1];
-    int query = target.indexOf('?');
-    if (query >= 0) target = target.substring(0, query);
-    return target.isEmpty() || target.equals("/") || target.equals("/index.html");
+    String t = target(head);
+    return t.isEmpty() || t.equals("/") || t.equals("/index.html");
+  }
+
+  /** True for {@link #OFFLINE_ROUTE}, which is served locally whatever the upstream is doing. */
+  private static boolean isOfflineRoute(byte[] head) {
+    String[] parts = firstLine(head).split(" ");
+    return parts.length >= 2 && "GET".equals(parts[0]) && OFFLINE_ROUTE.equals(target(head));
+  }
+
+  /**
+   * The {@code why=} the App put on {@link #OFFLINE_ROUTE}, so the page can name the socket error
+   * that sent it there. Absent or undecodable means the page simply shows no reason.
+   */
+  private static String offlineReason(byte[] head) {
+    String[] parts = firstLine(head).split(" ");
+    if (parts.length < 2) return "";
+    int query = parts[1].indexOf('?');
+    if (query < 0) return "";
+    for (String pair : parts[1].substring(query + 1).split("&")) {
+      if (!pair.startsWith("why=")) continue;
+      try {
+        return java.net.URLDecoder.decode(pair.substring(4), "UTF-8");
+      } catch (Exception e) {
+        return pair.substring(4);
+      }
+    }
+    return "";
+  }
+
+  /** The request target with any query removed. */
+  private static String target(byte[] head) {
+    String[] parts = firstLine(head).split(" ");
+    if (parts.length < 2) return "";
+    String t = parts[1];
+    int query = t.indexOf('?');
+    return query < 0 ? t : t.substring(0, query);
   }
 
   private static String firstLine(byte[] head) {
