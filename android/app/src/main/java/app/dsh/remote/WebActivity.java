@@ -5,7 +5,10 @@ import android.app.AlertDialog;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.res.ColorStateList;
+import android.content.res.Configuration;
 import android.graphics.Color;
+import android.graphics.drawable.Drawable;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.Uri;
@@ -18,6 +21,7 @@ import android.view.LayoutInflater;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.Window;
+import android.view.WindowManager;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
@@ -36,6 +40,7 @@ import androidx.core.graphics.Insets;
 import androidx.core.view.OnApplyWindowInsetsListener;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 
 import java.io.IOException;
 
@@ -202,6 +207,7 @@ public class WebActivity extends Activity {
   protected void onResume() {
     super.onResume();
     if (Prefs.ready(this)) scheduleRenew();
+    refreshChrome();
   }
 
   private void stopTunnel() {
@@ -224,6 +230,21 @@ public class WebActivity extends Activity {
    * keyboard inset from getSystemWindowInsetBottom() would break the keyboard. Older devices keep
    * the legacy opaque bars and non-edge-to-edge layout.
    *
+   * <p>The window is also let into the display cutout (SHORT_EDGES). In the default cutout mode the
+   * window frame is inset by the cutout's full depth, so in landscape - where the notch ends up on
+   * a short edge - no window covers the strip beside it and the system paints that strip black.
+   * That was the black bar down the side of the screen. Since the window now covers the notch, the
+   * listener below pads for the system bars only and no longer for the cutout: padding by the
+   * cutout's depth would leave a dead 144px gutter down the left edge in landscape, and the rail is
+   * wanted flush there. In portrait this changes nothing - the status bar inset (144px) already
+   * equals the cutout's depth.
+   *
+   * <p>ponytail: the notch keeps its own small band in landscape, so whatever the page puts there
+   * is under it - the price of a flush edge. Only raise this again if that band ever eats a control.
+   *
+   * <p>Below API 30 the cutout is left alone: there the window is not edge-to-edge anyway, and
+   * covering the notch without inset handling would put content under it.
+   *
    * <p>The insets go through androidx.core rather than the platform WindowInsets: the platform
    * version of getInsets()/WindowInsets.Type only exists from API 29/30, and this activity is also
    * installed on API 26 phones (lint NewApi on the plain calls; androidx also covers API 26 with the
@@ -232,6 +253,10 @@ public class WebActivity extends Activity {
   private void applyImmersive() {
     if (Build.VERSION.SDK_INT < 30) return;
     Window w = getWindow();
+    WindowManager.LayoutParams lp = w.getAttributes();
+    lp.layoutInDisplayCutoutMode =
+        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+    w.setAttributes(lp);
     w.setDecorFitsSystemWindows(false);
     w.setStatusBarColor(Color.TRANSPARENT);
     w.setNavigationBarColor(Color.TRANSPARENT);
@@ -243,10 +268,7 @@ public class WebActivity extends Activity {
         new OnApplyWindowInsetsListener() {
           @Override
           public WindowInsetsCompat onApplyWindowInsets(View v, WindowInsetsCompat insets) {
-            Insets bars =
-                insets.getInsets(
-                    WindowInsetsCompat.Type.systemBars()
-                        | WindowInsetsCompat.Type.displayCutout());
+            Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
             int ime = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom;
             v.setPadding(bars.left, bars.top, bars.right, ime);
             gestureInsetPx = bars.bottom;
@@ -268,6 +290,80 @@ public class WebActivity extends Activity {
     float css = px / getResources().getDisplayMetrics().density;
     web.evaluateJavascript(
         "document.documentElement.style.setProperty('--dsh-safe-bottom','" + css + "px')", null);
+  }
+
+  /**
+   * The system switched light/dark and the activity was deliberately not recreated for it (uiMode
+   * is in configChanges, so the page the user is reading survives): the page below the toolbar
+   * followed the switch on its own, but the views already on screen kept the colours they were
+   * inflated with. Anything inflated from here on - the setup dialog, the toolbar's popup - is
+   * already correct, because a configuration change rebases the theme and clears the caches behind
+   * it. See {@link #refreshChrome}.
+   */
+  @Override
+  public void onConfigurationChanged(Configuration config) {
+    super.onConfigurationChanged(config);
+    refreshChrome();
+  }
+
+  /**
+   * Re-apply the shell's colours and the system bars' appearance for the current uiMode. Idempotent,
+   * which is why {@link #onResume} runs it too: a switch that happened while the app was in the
+   * background is not guaranteed to reach us as a callback. The colours mirror activity_main.xml.
+   *
+   * <p>ponytail: an already-open popup or dialog keeps the old colours until it is reopened - not
+   * worth rebuilding them for a theme switch.
+   */
+  private void refreshChrome() {
+    boolean night = isNight();
+    findViewById(R.id.root).setBackgroundColor(getColor(R.color.page_bg));
+    bar.setBackgroundColor(getColor(R.color.page_bg));
+    bar.setTitleTextColor(getColor(R.color.ink));
+    bar.setSubtitleTextColor(getColor(R.color.ink_dim));
+    // The toolbar's ⋮ is the framework's own vector, tinted with ?attr/colorControlNormal when it is
+    // inflated - one more colour that was baked in. Re-tinting the instance the button already shows
+    // is enough (setImageDrawable is not the only way in), and it costs no asset of our own.
+    Drawable overflow = bar.getOverflowIcon();
+    if (overflow != null) overflow.mutate().setTint(getColor(R.color.ink));
+    findViewById(R.id.divider).setBackgroundColor(getColor(R.color.line));
+    progress.setProgressTintList(ColorStateList.valueOf(getColor(R.color.brand)));
+    progress.setProgressBackgroundTintList(ColorStateList.valueOf(getColor(R.color.line)));
+    overlay.setBackgroundColor(getColor(R.color.page_bg));
+    ovTitle.setTextColor(getColor(R.color.ink));
+    ovReason.setTextColor(getColor(R.color.ink_dim));
+    ((TextView) findViewById(R.id.ov_hint)).setTextColor(getColor(R.color.ink_dim));
+    TextView retry = (TextView) findViewById(R.id.ov_retry);
+    retry.setTextColor(getColor(R.color.on_brand));
+    retry.setBackgroundResource(R.drawable.btn_primary);
+    TextView setup = (TextView) findViewById(R.id.ov_setup);
+    setup.setTextColor(getColor(R.color.brand));
+    setup.setBackgroundResource(R.drawable.btn_ghost);
+    applyBars(night);
+  }
+
+  /**
+   * The two system bars are window attributes rather than views: their icon tint - and, below API
+   * 30, their colour - is read from the theme once, when the window is created, so a theme switch
+   * leaves them stale even after the views behind them have been re-coloured. From API 30 the bars
+   * are transparent and what shows through them is the root view's colour, refreshed above.
+   */
+  private void applyBars(boolean night) {
+    Window w = getWindow();
+    if (Build.VERSION.SDK_INT < 30) {
+      w.setStatusBarColor(getColor(R.color.page_bg));
+    }
+    WindowInsetsControllerCompat c = ViewCompat.getWindowInsetsController(w.getDecorView());
+    // Null while the decor view is not attached yet, i.e. on the way up in onResume: the theme's own
+    // windowLightStatusBar / windowLightNavigationBar are still the right ones there.
+    if (c != null) {
+      c.setAppearanceLightStatusBars(!night);
+      c.setAppearanceLightNavigationBars(!night);
+    }
+  }
+
+  private boolean isNight() {
+    return (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
+        == Configuration.UI_MODE_NIGHT_YES;
   }
 
   private void setStatus(int resId) {
